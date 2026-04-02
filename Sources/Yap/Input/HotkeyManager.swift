@@ -106,7 +106,11 @@ class HotkeyManager: ObservableObject {
             },
             userInfo: nil
         ) else {
-            print("[Yap] Failed to create event tap — need Accessibility permission")
+            print("[Yap] ❌ Failed to create event tap — need Accessibility permission")
+            DispatchQueue.main.async {
+                AppState.shared.isEventTapActive = false
+                AppState.shared.error = "Accessibility permission required. Enable Yap in System Settings → Privacy & Security → Accessibility, then restart."
+            }
             return
         }
 
@@ -116,7 +120,10 @@ class HotkeyManager: ObservableObject {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        print("[Yap] Event tap installed — hold \(currentKey.rawValue) to record")
+        DispatchQueue.main.async {
+            AppState.shared.isEventTapActive = true
+        }
+        print("[Yap] ✅ Event tap installed — hold \(currentKey.rawValue) to record")
     }
 
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {

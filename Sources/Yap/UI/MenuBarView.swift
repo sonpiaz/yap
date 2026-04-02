@@ -20,6 +20,26 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Error message
+            if let error = appState.error {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                if !appState.isEventTapActive {
+                    Button("Open Accessibility Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                    }
+                    Button("Retry Event Tap") {
+                        HotkeyManager.shared.setup()
+                    }
+                }
+                Divider()
+            }
+
             // Recording indicator
             if appState.isRecording {
                 RecordingIndicator(audioLevel: appState.audioLevel)
@@ -97,6 +117,7 @@ struct MenuBarView: View {
     private var statusColor: Color {
         if appState.isRecording { return .red }
         if appState.isTranscribing { return .orange }
+        if !appState.isEventTapActive { return .red }
         if appState.isModelLoaded { return .green }
         return .gray
     }
@@ -104,6 +125,9 @@ struct MenuBarView: View {
     private var statusText: String {
         if appState.isRecording { return "Recording..." }
         if appState.isTranscribing { return "Transcribing..." }
+        if !appState.isEventTapActive {
+            return "⚠️ Accessibility denied — enable in System Settings"
+        }
         if appState.isModelLoaded { return "Ready — hold \(HotkeyManager.shared.currentKey.rawValue)" }
         return "Loading model..."
     }

@@ -37,6 +37,7 @@ class AppState: ObservableObject {
     @Published var audioLevel: Float = 0.0
     @Published var recordingDuration: TimeInterval = 0.0
     @Published var error: String?
+    @Published var isEventTapActive = false
 
     // Stats
     @Published var totalTranscriptions: Int = 0
