@@ -42,6 +42,7 @@ actor LLMProcessor {
 
     // MARK: - Ollama (local)
 
+    // Clean mode → llama3.2:3b (fast, ~200ms)
     private func ollamaClean(_ text: String) async throws -> String {
         let prompt = """
         Fix this speech transcription. It may mix Vietnamese and English. \
@@ -50,9 +51,10 @@ actor LLMProcessor {
 
         Input: \(text)
         """
-        return try await callOllama(prompt: prompt)
+        return try await callOllama(prompt: prompt, model: "llama3.2:3b")
     }
 
+    // Smart mode → qwen2.5:14b (better Vi/En understanding, ~1-2s)
     private func ollamaSmart(_ text: String) async throws -> String {
         let prompt = """
         Format this speech transcription intelligently. It may mix Vietnamese and English.
@@ -67,21 +69,25 @@ actor LLMProcessor {
 
         Input: \(text)
         """
-        return try await callOllama(prompt: prompt)
+        return try await callOllama(prompt: prompt, model: "qwen2.5:14b")
     }
 
-    private func callOllama(prompt: String) async throws -> String {
+    private func callOllama(prompt: String, model: String? = nil) async throws -> String {
         let url = URL(string: "http://localhost:11434/api/generate")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 10
+        request.timeoutInterval = model == "qwen2.5:14b" ? 30 : 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let selectedModel = model
+            ?? UserDefaults.standard.string(forKey: "ollamaModel")
+            ?? "qwen2.5:14b"
+
         let body: [String: Any] = [
-            "model": UserDefaults.standard.string(forKey: "ollamaModel") ?? "llama3.2",
+            "model": selectedModel,
             "prompt": prompt,
             "stream": false,
-            "options": ["temperature": 0.1]
+            "options": ["temperature": 0.1, "num_predict": 512]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

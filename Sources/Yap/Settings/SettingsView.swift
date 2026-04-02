@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("claudeApiKey") private var claudeApiKey = ""
-    @AppStorage("ollamaModel") private var ollamaModel = "llama3.2"
+    @AppStorage("ollamaModel") private var ollamaModel = "qwen2.5:14b"
     @AppStorage("whisperModel") private var whisperModel = "large-v3"
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @State private var ollamaStatus = "Checking..."
