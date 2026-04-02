@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+    @ObservedObject var hotkeyManager = HotkeyManager.shared
     @AppStorage("claudeApiKey") private var claudeApiKey = ""
     @AppStorage("ollamaModel") private var ollamaModel = "qwen2.5:14b"
     @AppStorage("whisperModel") private var whisperModel = "large-v3"
@@ -26,9 +27,12 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("Hotkey") {
-                Text("Hold **Right Option (⌥)** to record")
-                    .font(.callout)
-                Text("Release to transcribe and paste")
+                Picker("Push-to-talk key", selection: $hotkeyManager.currentKey) {
+                    ForEach(TriggerKey.allCases) { key in
+                        Text(key.rawValue).tag(key)
+                    }
+                }
+                Text("Hold to record, release to transcribe and paste")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

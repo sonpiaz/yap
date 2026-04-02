@@ -2,6 +2,47 @@ import Cocoa
 import Carbon
 import Combine
 
+enum TriggerKey: String, CaseIterable, Identifiable {
+    case rightOption = "Right Option (⌥)"
+    case rightCommand = "Right Command (⌘)"
+    case leftControl = "Left Control (⌃)"
+    case fn = "Fn (Globe)"
+    case f5 = "F5"
+    case f6 = "F6"
+
+    var id: String { rawValue }
+
+    var keyCode: CGKeyCode {
+        switch self {
+        case .rightOption: return 61
+        case .rightCommand: return 54
+        case .leftControl: return 59
+        case .fn: return 63
+        case .f5: return 96
+        case .f6: return 97
+        }
+    }
+
+    /// Whether this key is a modifier (detected via flagsChanged) or a regular key
+    var isModifier: Bool {
+        switch self {
+        case .rightOption, .rightCommand, .leftControl, .fn: return true
+        case .f5, .f6: return false
+        }
+    }
+
+    /// The CGEventFlags mask to check for modifier keys
+    var flagMask: CGEventFlags? {
+        switch self {
+        case .rightOption: return .maskAlternate
+        case .rightCommand: return .maskCommand
+        case .leftControl: return .maskControl
+        case .fn: return .maskSecondaryFn
+        case .f5, .f6: return nil
+        }
+    }
+}
+
 class HotkeyManager: ObservableObject {
     static let shared = HotkeyManager()
 
@@ -10,15 +51,31 @@ class HotkeyManager: ObservableObject {
     private var isHotkeyDown = false
     private var recordingStartTime: Date?
 
-    // Default: Right Option key for push-to-talk
-    private let triggerKeyCode: CGKeyCode = 61  // Right Option
-    private let minimumRecordingDuration: TimeInterval = 0.3  // Ignore accidental taps
+    @Published var currentKey: TriggerKey {
+        didSet {
+            UserDefaults.standard.set(currentKey.rawValue, forKey: "triggerKey")
+        }
+    }
 
-    private init() {}
+    private let minimumRecordingDuration: TimeInterval = 0.3
+
+    private init() {
+        if let saved = UserDefaults.standard.string(forKey: "triggerKey"),
+           let key = TriggerKey(rawValue: saved) {
+            currentKey = key
+        } else {
+            currentKey = .rightOption
+        }
+    }
 
     func setup() {
         requestAccessibilityPermissions()
         installEventTap()
+    }
+
+    func changeKey(_ key: TriggerKey) {
+        currentKey = key
+        print("[Yap] Hotkey changed to \(key.rawValue)")
     }
 
     private func requestAccessibilityPermissions() {
@@ -51,46 +108,81 @@ class HotkeyManager: ObservableObject {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        print("[Yap] Event tap installed — hold Right Option to record")
+        print("[Yap] Event tap installed — hold \(currentKey.rawValue) to record")
     }
 
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        let key = currentKey
 
-        // Handle Right Option key
-        if keyCode == triggerKeyCode {
-            let flags = event.flags
+        if key.isModifier {
+            return handleModifierKey(keyCode: keyCode, event: event, key: key)
+        } else {
+            return handleRegularKey(keyCode: keyCode, type: type, event: event, key: key)
+        }
+    }
 
-            if flags.contains(.maskAlternate) && !isHotkeyDown {
-                // Key pressed down — start recording
-                isHotkeyDown = true
-                recordingStartTime = Date()
-                DispatchQueue.main.async {
-                    PipelineController.shared.startRecording()
-                }
-                return nil  // Consume the event
+    // MARK: - Modifier keys (Option, Command, Control, Fn)
 
-            } else if !flags.contains(.maskAlternate) && isHotkeyDown {
-                // Key released — stop recording
-                isHotkeyDown = false
-                let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+    private func handleModifierKey(keyCode: CGKeyCode, event: CGEvent, key: TriggerKey) -> Unmanaged<CGEvent>? {
+        guard keyCode == key.keyCode, let mask = key.flagMask else {
+            return Unmanaged.passRetained(event)
+        }
 
-                if duration >= minimumRecordingDuration {
-                    DispatchQueue.main.async {
-                        PipelineController.shared.stopAndTranscribe()
-                    }
-                } else {
-                    // Too short — cancel
-                    DispatchQueue.main.async {
-                        PipelineController.shared.cancelRecording()
-                    }
-                }
-                recordingStartTime = nil
-                return nil  // Consume the event
+        let flags = event.flags
+
+        if flags.contains(mask) && !isHotkeyDown {
+            isHotkeyDown = true
+            recordingStartTime = Date()
+            DispatchQueue.main.async {
+                PipelineController.shared.startRecording()
             }
+            return nil
+        } else if !flags.contains(mask) && isHotkeyDown {
+            isHotkeyDown = false
+            finishRecording()
+            return nil
         }
 
         return Unmanaged.passRetained(event)
+    }
+
+    // MARK: - Regular keys (F5, F6, etc.)
+
+    private func handleRegularKey(keyCode: CGKeyCode, type: CGEventType, event: CGEvent, key: TriggerKey) -> Unmanaged<CGEvent>? {
+        guard keyCode == key.keyCode else {
+            return Unmanaged.passRetained(event)
+        }
+
+        if type == .keyDown && !isHotkeyDown {
+            isHotkeyDown = true
+            recordingStartTime = Date()
+            DispatchQueue.main.async {
+                PipelineController.shared.startRecording()
+            }
+            return nil
+        } else if type == .keyUp && isHotkeyDown {
+            isHotkeyDown = false
+            finishRecording()
+            return nil
+        }
+
+        return Unmanaged.passRetained(event)
+    }
+
+    private func finishRecording() {
+        let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        recordingStartTime = nil
+
+        if duration >= minimumRecordingDuration {
+            DispatchQueue.main.async {
+                PipelineController.shared.stopAndTranscribe()
+            }
+        } else {
+            DispatchQueue.main.async {
+                PipelineController.shared.cancelRecording()
+            }
+        }
     }
 
     func cleanup() {

@@ -104,7 +104,7 @@ struct MenuBarView: View {
     private var statusText: String {
         if appState.isRecording { return "Recording..." }
         if appState.isTranscribing { return "Transcribing..." }
-        if appState.isModelLoaded { return "Ready — hold ⌥R to speak" }
+        if appState.isModelLoaded { return "Ready — hold \(HotkeyManager.shared.currentKey.rawValue)" }
         return "Loading model..."
     }
 }
