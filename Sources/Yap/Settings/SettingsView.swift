@@ -1,25 +1,19 @@
 import SwiftUI
+import KeyboardShortcuts
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
-    @ObservedObject var hotkeyManager = HotkeyManager.shared
     @AppStorage("claudeApiKey") private var claudeApiKey = ""
-    @AppStorage("ollamaModel") private var ollamaModel = "qwen2.5:14b"
-    @AppStorage("whisperModel") private var whisperModel = "large-v3"
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @State private var ollamaStatus = "Checking..."
 
     var body: some View {
         TabView {
             generalTab
                 .tabItem { Label("General", systemImage: "gear") }
-            modelsTab
-                .tabItem { Label("Models", systemImage: "cpu") }
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 450, height: 350)
-        .onAppear { checkOllama() }
+        .frame(width: 450, height: 300)
     }
 
     // MARK: - General
@@ -27,11 +21,7 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("Hotkey") {
-                Picker("Push-to-talk key", selection: $hotkeyManager.currentKey) {
-                    ForEach(TriggerKey.allCases) { key in
-                        Text(key.rawValue).tag(key)
-                    }
-                }
+                KeyboardShortcuts.Recorder("Push-to-talk key", name: .pushToTalk)
                 Text("Hold to record, release to transcribe and paste")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -52,49 +42,16 @@ struct SettingsView: View {
                 .pickerStyle(.radioGroup)
             }
 
+            Section("Smart Mode (Claude API)") {
+                SecureField("Claude API key", text: $claudeApiKey)
+                    .textFieldStyle(.roundedBorder)
+                Text("Optional. Used in Smart mode for context-aware formatting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Startup") {
                 Toggle("Launch at login", isOn: $launchAtLogin)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    // MARK: - Models
-
-    private var modelsTab: some View {
-        Form {
-            Section("Speech-to-Text (WhisperKit)") {
-                Picker("Whisper model", selection: $whisperModel) {
-                    Text("large-v3 (best accuracy, ~3GB)").tag("large-v3")
-                    Text("small (balanced, ~500MB)").tag("small")
-                    Text("base (fastest, ~150MB)").tag("base")
-                }
-                Text("large-v3 recommended for Vietnamese + English")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("LLM Cleanup") {
-                HStack {
-                    Text("Ollama")
-                    Spacer()
-                    Text(ollamaStatus)
-                        .foregroundStyle(ollamaStatus == "Connected" ? .green : .orange)
-                    Button("Refresh") { checkOllama() }
-                        .buttonStyle(.borderless)
-                }
-
-                TextField("Ollama model", text: $ollamaModel)
-                    .textFieldStyle(.roundedBorder)
-
-                Divider()
-
-                SecureField("Claude API key (fallback)", text: $claudeApiKey)
-                    .textFieldStyle(.roundedBorder)
-                Text("Used when Ollama unavailable. Uses claude-haiku-4-5 for speed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -113,13 +70,13 @@ struct SettingsView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("v0.1.0")
+            Text("v0.2.0")
                 .foregroundStyle(.secondary)
 
             Text("Push-to-talk dictation for Mac")
                 .font(.callout)
 
-            Text("Local Whisper • Vi/En mixing • LLM cleanup")
+            Text("Apple Speech • Vi/En support • Local + Fast")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -131,21 +88,5 @@ struct SettingsView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func checkOllama() {
-        Task {
-            do {
-                let url = URL(string: "http://localhost:11434/api/tags")!
-                let (_, response) = try await URLSession.shared.data(from: url)
-                if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    ollamaStatus = "Connected"
-                } else {
-                    ollamaStatus = "Not running"
-                }
-            } catch {
-                ollamaStatus = "Not running"
-            }
-        }
     }
 }

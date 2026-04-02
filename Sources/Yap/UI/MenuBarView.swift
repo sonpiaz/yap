@@ -13,7 +13,7 @@ struct MenuBarView: View {
                 Text(statusText)
                     .font(.system(.body, design: .rounded, weight: .medium))
                 Spacer()
-                Text("v0.1.0")
+                Text("v0.2.0")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -28,14 +28,6 @@ struct MenuBarView: View {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
-                }
-                if !appState.isEventTapActive {
-                    Button("Open Accessibility Settings") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-                    }
-                    Button("Retry Event Tap") {
-                        HotkeyManager.shared.setup()
-                    }
                 }
                 Divider()
             }
@@ -117,7 +109,6 @@ struct MenuBarView: View {
     private var statusColor: Color {
         if appState.isRecording { return .red }
         if appState.isTranscribing { return .orange }
-        if !appState.isEventTapActive { return .red }
         if appState.isModelLoaded { return .green }
         return .gray
     }
@@ -125,11 +116,8 @@ struct MenuBarView: View {
     private var statusText: String {
         if appState.isRecording { return "Recording..." }
         if appState.isTranscribing { return "Transcribing..." }
-        if !appState.isEventTapActive {
-            return "⚠️ Accessibility denied — enable in System Settings"
-        }
-        if appState.isModelLoaded { return "Ready — hold \(HotkeyManager.shared.currentKey.rawValue)" }
-        return "Loading model..."
+        if appState.isModelLoaded { return "Ready — press ⌥Space" }
+        return "Loading..."
     }
 }
 

@@ -24,5 +24,7 @@
     <string>Yap needs microphone access to transcribe your speech.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Yap needs automation access to paste text into other apps.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Yap uses speech recognition to transcribe your voice into text.</string>
 </dict>
 </plist>

@@ -96,11 +96,3 @@ struct TextInserter {
         keyUp?.post(tap: .cgAnnotatedSessionEventTap)
     }
 }
-
-struct AccessibilityManager {
-    static func requestPermissions() {
-        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
-        let trusted = AXIsProcessTrustedWithOptions(options)
-        print("[Yap] Accessibility permission: \(trusted ? "granted" : "not yet — dialog shown")")
-    }
-}

@@ -12,7 +12,7 @@ enum TranscriptionMode: String, CaseIterable, Identifiable {
         switch self {
         case .raw: return "Verbatim — exactly what you said"
         case .clean: return "Remove fillers, fix punctuation"
-        case .smart: return "Context-aware formatting"
+        case .smart: return "Context-aware formatting (Claude)"
         }
     }
 
@@ -37,14 +37,12 @@ class AppState: ObservableObject {
     @Published var audioLevel: Float = 0.0
     @Published var recordingDuration: TimeInterval = 0.0
     @Published var error: String?
-    @Published var isEventTapActive = false
 
     // Stats
     @Published var totalTranscriptions: Int = 0
     @Published var totalWordsToday: Int = 0
 
     private init() {
-        // Load saved mode
         if let saved = UserDefaults.standard.string(forKey: "transcriptionMode"),
            let mode = TranscriptionMode(rawValue: saved) {
             currentMode = mode

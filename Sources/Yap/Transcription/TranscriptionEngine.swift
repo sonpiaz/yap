@@ -1,101 +1,105 @@
 import Foundation
-import WhisperKit
+import Speech
+import AVFoundation
 
 @MainActor
 class TranscriptionEngine: ObservableObject {
     static let shared = TranscriptionEngine()
 
-    private var whisperKit: WhisperKit?
+    private var recognizer: SFSpeechRecognizer?
     @Published var isLoaded = false
     @Published var loadingProgress: String = ""
 
     private init() {}
 
     func preload() async {
-        do {
-            loadingProgress = "Downloading model..."
-            let config = WhisperKitConfig(
-                model: "large-v3",
-                computeOptions: ModelComputeOptions(
-                    audioEncoderCompute: .cpuAndNeuralEngine,
-                    textDecoderCompute: .cpuAndNeuralEngine
-                )
-            )
-            let kit = try await WhisperKit(config)
-            self.whisperKit = kit
-            self.isLoaded = true
-            self.loadingProgress = "Ready"
-            print("[Yap] WhisperKit loaded: large-v3")
-        } catch {
-            print("[Yap] Failed to load large-v3, trying base...")
-            await loadFallbackModel()
-        }
-    }
+        loadingProgress = "Setting up speech engine..."
 
-    private func loadFallbackModel() async {
-        do {
-            let config = WhisperKitConfig(model: "base")
-            let kit = try await WhisperKit(config)
-            self.whisperKit = kit
-            self.isLoaded = true
-            self.loadingProgress = "Ready (base model)"
-            print("[Yap] WhisperKit loaded: base (fallback)")
-        } catch {
-            self.loadingProgress = "Failed to load model: \(error.localizedDescription)"
-            print("[Yap] WhisperKit failed: \(error)")
+        // Try Vietnamese first, fall back to default locale
+        if let viRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "vi-VN")),
+           viRecognizer.isAvailable {
+            self.recognizer = viRecognizer
+            print("[Yap] SFSpeechRecognizer loaded: vi-VN")
+        } else if let defaultRecognizer = SFSpeechRecognizer() {
+            self.recognizer = defaultRecognizer
+            print("[Yap] SFSpeechRecognizer loaded: \(defaultRecognizer.locale.identifier) (Vietnamese unavailable)")
+        } else {
+            loadingProgress = "Speech recognition unavailable"
+            print("[Yap] No speech recognizer available")
+            return
         }
+
+        // Prefer on-device if available
+        if recognizer?.supportsOnDeviceRecognition == true {
+            print("[Yap] On-device recognition supported")
+        } else {
+            print("[Yap] On-device not available — will use server")
+        }
+
+        isLoaded = true
+        loadingProgress = "Ready"
+        AppState.shared.isModelLoaded = true
+        print("[Yap] Speech engine ready")
     }
 
     func transcribe(audioSamples: [Float]) async throws -> YapTranscription {
-        guard let whisperKit = whisperKit else {
+        guard let recognizer = recognizer, recognizer.isAvailable else {
             throw YapTranscriptionError.modelNotLoaded
         }
 
-        // Don't force language — let Whisper auto-detect per segment for Vi/En mixing
-        let options = DecodingOptions(
-            verbose: false,
-            task: .transcribe,
-            temperatureFallbackCount: 3,
-            sampleLength: 224,
-            noSpeechThreshold: 0.6
-        )
+        // Convert Float samples (16kHz mono) to an audio file for SFSpeechRecognizer
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("yap_recording.wav")
+        try writeWAV(samples: audioSamples, sampleRate: 16000, to: tempURL)
 
-        let results = try await whisperKit.transcribe(
-            audioArray: audioSamples,
-            decodeOptions: options
-        )
-
-        guard let result = results.first else {
-            throw YapTranscriptionError.emptyResult
+        let request = SFSpeechURLRecognitionRequest(url: tempURL)
+        request.shouldReportPartialResults = false
+        if recognizer.supportsOnDeviceRecognition {
+            request.requiresOnDeviceRecognition = true
         }
 
-        let filteredText = filterHallucinations(from: result)
+        let result: SFSpeechRecognitionResult = try await withCheckedThrowingContinuation { continuation in
+            recognizer.recognitionTask(with: request) { result, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let result = result, result.isFinal else { return }
+                continuation.resume(returning: result)
+            }
+        }
+
+        // Clean up temp file
+        try? FileManager.default.removeItem(at: tempURL)
+
+        let text = result.bestTranscription.formattedString
+        let locale = recognizer.locale.identifier
 
         return YapTranscription(
-            text: filteredText,
-            language: result.language ?? "unknown",
-            segments: result.segments.map { seg in
+            text: text,
+            language: locale,
+            segments: result.bestTranscription.segments.map { seg in
                 YapSegment(
-                    text: seg.text,
-                    start: seg.start,
-                    end: seg.end
+                    text: seg.substring,
+                    start: Float(seg.timestamp),
+                    end: Float(seg.timestamp + seg.duration)
                 )
             }
         )
     }
 
-    private func filterHallucinations(from result: TranscriptionResult) -> String {
-        let hallPatterns = ["...", "Thank you", "Cảm ơn đã xem", "Hẹn gặp lại",
-                           "Đăng ký kênh", "Subscribe", "Thanks for watching"]
+    /// Write raw Float PCM samples to a WAV file
+    private func writeWAV(samples: [Float], sampleRate: Int, to url: URL) throws {
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))!
+        buffer.frameLength = AVAudioFrameCount(samples.count)
 
-        let validSegments = result.segments.filter { segment in
-            let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { return false }
-            if hallPatterns.contains(trimmed) { return false }
-            if segment.avgLogprob < -1.5 { return false }
-            return true
+        let channelData = buffer.floatChannelData![0]
+        for i in 0..<samples.count {
+            channelData[i] = samples[i]
         }
-        return validSegments.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        try file.write(from: buffer)
     }
 }
 
@@ -117,7 +121,7 @@ enum YapTranscriptionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .modelNotLoaded: return "Whisper model not loaded yet"
+        case .modelNotLoaded: return "Speech recognizer not available"
         case .emptyResult: return "No speech detected"
         }
     }

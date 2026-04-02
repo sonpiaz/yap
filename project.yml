@@ -7,15 +7,9 @@ options:
   generateEmptyDirectories: true
 
 packages:
-  WhisperKit:
-    url: https://github.com/argmaxinc/WhisperKit
-    from: "0.9.0"
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     from: "2.0.0"
-  HotKey:
-    url: https://github.com/soffes/HotKey
-    from: "0.2.1"
 
 targets:
   Yap:
@@ -29,19 +23,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sonpiaz.yap
         PRODUCT_NAME: Yap
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2"
         INFOPLIST_FILE: Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/Yap.entitlements
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
-        ENABLE_HARDENED_RUNTIME: true
+        ENABLE_HARDENED_RUNTIME: false
         CODE_SIGN_IDENTITY: "-"
     dependencies:
-      - package: WhisperKit
       - package: KeyboardShortcuts
-      - package: HotKey
     entitlements:
       path: Resources/Yap.entitlements
       properties:
