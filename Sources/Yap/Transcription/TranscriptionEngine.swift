@@ -14,7 +14,6 @@ class TranscriptionEngine: ObservableObject {
     func preload() async {
         do {
             loadingProgress = "Downloading model..."
-            // Use large-v3 for best Vi/En accuracy. Falls back to base if not enough RAM.
             let config = WhisperKitConfig(
                 model: "large-v3",
                 computeOptions: ModelComputeOptions(
@@ -28,7 +27,7 @@ class TranscriptionEngine: ObservableObject {
             self.loadingProgress = "Ready"
             print("[Yap] WhisperKit loaded: large-v3")
         } catch {
-            print("[Yap] Failed to load large-v3, trying base.en...")
+            print("[Yap] Failed to load large-v3, trying base...")
             await loadFallbackModel()
         }
     }
@@ -47,9 +46,9 @@ class TranscriptionEngine: ObservableObject {
         }
     }
 
-    func transcribe(audioSamples: [Float]) async throws -> TranscriptionResult {
+    func transcribe(audioSamples: [Float]) async throws -> YapTranscription {
         guard let whisperKit = whisperKit else {
-            throw TranscriptionError.modelNotLoaded
+            throw YapTranscriptionError.modelNotLoaded
         }
 
         // Don't force language — let Whisper auto-detect per segment for Vi/En mixing
@@ -58,7 +57,7 @@ class TranscriptionEngine: ObservableObject {
             task: .transcribe,
             temperatureFallbackCount: 3,
             sampleLength: 224,
-            noSpeechThreshold: 0.6  // Higher threshold to reduce hallucination
+            noSpeechThreshold: 0.6
         )
 
         let results = try await whisperKit.transcribe(
@@ -67,52 +66,32 @@ class TranscriptionEngine: ObservableObject {
         )
 
         guard let result = results.first else {
-            throw TranscriptionError.emptyResult
+            throw YapTranscriptionError.emptyResult
         }
 
-        // Filter out hallucinated segments (very low avg logprob)
-        let filteredText = filterHallucinations(result)
+        let filteredText = filterHallucinations(from: result)
 
-        return TranscriptionResult(
+        return YapTranscription(
             text: filteredText,
             language: result.language ?? "unknown",
             segments: result.segments.map { seg in
-                TranscriptionSegment(
+                YapSegment(
                     text: seg.text,
                     start: seg.start,
-                    end: seg.end,
-                    language: nil
+                    end: seg.end
                 )
             }
         )
     }
 
-    private func filterHallucinations(_ result: TranscriptionResult) -> String {
-        // Filter segments with very low confidence (likely hallucination)
-        let validSegments = result.segments.filter { segment in
-            // Keep segments that aren't suspiciously repetitive
-            let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { return false }
-            // Filter common hallucination patterns
-            let hallPatterns = ["...", "Thank you", "Cảm ơn đã xem", "Hẹn gặp lại"]
-            for pattern in hallPatterns {
-                if trimmed == pattern { return false }
-            }
-            return true
-        }
-        return validSegments.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespaces)
-    }
+    private func filterHallucinations(from result: TranscriptionResult) -> String {
+        let hallPatterns = ["...", "Thank you", "Cảm ơn đã xem", "Hẹn gặp lại",
+                           "Đăng ký kênh", "Subscribe", "Thanks for watching"]
 
-    // Overload for WhisperKit's native result type
-    private func filterHallucinations(_ result: WhisperKit.TranscriptionResult) -> String {
         let validSegments = result.segments.filter { segment in
             let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { return false }
-            let hallPatterns = ["...", "Thank you", "Cảm ơn đã xem", "Hẹn gặp lại"]
-            for pattern in hallPatterns {
-                if trimmed == pattern { return false }
-            }
-            // Filter by avg log probability if available
+            if hallPatterns.contains(trimmed) { return false }
             if segment.avgLogprob < -1.5 { return false }
             return true
         }
@@ -120,20 +99,19 @@ class TranscriptionEngine: ObservableObject {
     }
 }
 
-struct TranscriptionResult {
+struct YapTranscription {
     let text: String
     let language: String
-    let segments: [TranscriptionSegment]
+    let segments: [YapSegment]
 }
 
-struct TranscriptionSegment {
+struct YapSegment {
     let text: String
     let start: Float
     let end: Float
-    let language: String?
 }
 
-enum TranscriptionError: LocalizedError {
+enum YapTranscriptionError: LocalizedError {
     case modelNotLoaded
     case emptyResult
 

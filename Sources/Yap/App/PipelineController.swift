@@ -57,8 +57,7 @@ class PipelineController: ObservableObject {
 
     private func transcribeAndPaste(samples: [Float]) async {
         do {
-            // Step 1: Transcribe
-            let result = try await engine.transcribe(audioSamples: samples)
+            let result: YapTranscription = try await engine.transcribe(audioSamples: samples)
             print("[Yap] Raw transcription (\(result.language)): \(result.text)")
 
             guard !result.text.isEmpty else {
