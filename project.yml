@@ -1,0 +1,49 @@
+name: Yap
+options:
+  bundleIdPrefix: com.sonpiaz
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+packages:
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    from: "0.9.0"
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: "2.0.0"
+  HotKey:
+    url: https://github.com/soffes/HotKey
+    from: "0.2.1"
+
+targets:
+  Yap:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    resources:
+      - Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sonpiaz.yap
+        PRODUCT_NAME: Yap
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/Yap.entitlements
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_IDENTITY: "-"
+    dependencies:
+      - package: WhisperKit
+      - package: KeyboardShortcuts
+      - package: HotKey
+    entitlements:
+      path: Resources/Yap.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+        com.apple.security.automation.apple-events: true

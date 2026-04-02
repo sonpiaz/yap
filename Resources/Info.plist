@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Yap</string>
+    <key>CFBundleDisplayName</key>
+    <string>Yap</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.sonpiaz.yap</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>Yap</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Yap needs microphone access to transcribe your speech.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Yap needs automation access to paste text into other apps.</string>
+</dict>
+</plist>
