@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// Orchestrates the full pipeline: record → transcribe → process → paste
 @MainActor
@@ -9,6 +10,8 @@ class PipelineController: ObservableObject {
     private let engine = TranscriptionEngine.shared
     private let llm = LLMProcessor.shared
     private let state = AppState.shared
+    private let overlay = RecordingOverlayController.shared
+    private var durationTimer: Timer?
 
     private init() {}
 
@@ -18,7 +21,20 @@ class PipelineController: ObservableObject {
         do {
             try recorder.startRecording()
             state.isRecording = true
+            state.recordingDuration = 0
             state.error = nil
+
+            // Show floating overlay
+            overlay.show()
+
+            // Start duration timer
+            durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.state.recordingDuration += 0.1
+                    self?.state.audioLevel = self?.recorder.audioLevel ?? 0
+                }
+            }
+
             print("[Yap] Recording started")
         } catch {
             state.error = "Mic error: \(error.localizedDescription)"
@@ -31,6 +47,12 @@ class PipelineController: ObservableObject {
 
         let samples = recorder.stopRecording()
         state.isRecording = false
+
+        // Hide overlay and stop timer
+        overlay.hide()
+        durationTimer?.invalidate()
+        durationTimer = nil
+
         state.isTranscribing = true
         print("[Yap] Recording stopped — \(samples.count) samples (\(String(format: "%.1f", Double(samples.count) / 16000))s)")
 
@@ -42,6 +64,9 @@ class PipelineController: ObservableObject {
             return
         }
 
+        // Play a subtle sound to confirm recording stopped
+        NSSound(named: "Pop")?.play()
+
         Task {
             await transcribeAndPaste(samples: samples)
         }
@@ -51,6 +76,9 @@ class PipelineController: ObservableObject {
         if state.isRecording {
             _ = recorder.stopRecording()
             state.isRecording = false
+            overlay.hide()
+            durationTimer?.invalidate()
+            durationTimer = nil
             print("[Yap] Recording cancelled")
         }
     }
@@ -65,14 +93,11 @@ class PipelineController: ObservableObject {
                 return
             }
 
-            // Step 2: LLM processing based on mode
             let processed = await llm.process(text: result.text, mode: state.currentMode)
             print("[Yap] Processed (\(state.currentMode.rawValue)): \(processed)")
 
-            // Step 3: Insert into active app
             TextInserter.insert(processed)
 
-            // Update state
             state.lastTranscription = processed
             state.isTranscribing = false
             state.totalTranscriptions += 1

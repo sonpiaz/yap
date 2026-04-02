@@ -84,6 +84,7 @@ class HotkeyManager: ObservableObject {
     }
 
     private func installEventTap() {
+        // Listen to all key events + flags (modifier) changes
         let eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
             | (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
@@ -91,9 +92,16 @@ class HotkeyManager: ObservableObject {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: .defaultTap,  // .defaultTap lets us consume events
             eventsOfInterest: eventMask,
             callback: { _, type, event, _ -> Unmanaged<CGEvent>? in
+                // Re-enable tap if macOS disables it (happens under heavy load)
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let tap = HotkeyManager.shared.eventTap {
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                    }
+                    return Unmanaged.passRetained(event)
+                }
                 return HotkeyManager.shared.handleEvent(type: type, event: event)
             },
             userInfo: nil
@@ -114,6 +122,14 @@ class HotkeyManager: ObservableObject {
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let key = currentKey
+
+        // Debug logging (remove later)
+        if type == .flagsChanged {
+            let flags = event.flags
+            print("[Yap:debug] flagsChanged keyCode=\(keyCode) flags=\(flags.rawValue)")
+        } else if type == .keyDown || type == .keyUp {
+            print("[Yap:debug] \(type == .keyDown ? "keyDown" : "keyUp") keyCode=\(keyCode)")
+        }
 
         if key.isModifier {
             return handleModifierKey(keyCode: keyCode, event: event, key: key)
