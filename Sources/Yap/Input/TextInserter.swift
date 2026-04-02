@@ -1,98 +1,85 @@
-import Cocoa
-import Carbon
+import AppKit
+import ApplicationServices
 
-struct TextInserter {
-    /// Insert text into the currently focused text field
+enum TextInserter {
+
     static func insert(_ text: String) {
-        // Method 1: Try AXUIElement (best for native apps)
-        if insertViaAccessibility(text) {
-            return
-        }
+        let autoPaste = UserDefaults.standard.bool(forKey: "autoPaste")
 
-        // Method 2: Clipboard paste (works everywhere)
-        insertViaClipboard(text)
+        if autoPaste {
+            // Try AX direct insert first (no clipboard pollution)
+            if AXIsProcessTrusted(), tryAXInsertion(text) {
+                return
+            }
+            // Fallback: clipboard + Cmd+V
+            pasteViaClipboard(text)
+        } else {
+            // Just copy to clipboard
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
     }
 
-    // MARK: - AXUIElement method
+    // MARK: - AX Direct Insert
 
-    private static func insertViaAccessibility(_ text: String) -> Bool {
-        let systemWide = AXUIElementCreateSystemWide()
-        var focusedElement: AnyObject?
+    private static func tryAXInsertion(_ text: String) -> Bool {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return false }
+        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
 
-        let result = AXUIElementCopyAttributeValue(
-            systemWide,
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
             kAXFocusedUIElementAttribute as CFString,
-            &focusedElement
-        )
+            &focusedRef
+        ) == .success else { return false }
 
-        guard result == .success, let element = focusedElement else {
-            return false
-        }
+        let focused = focusedRef as! AXUIElement
 
-        let axElement = element as! AXUIElement
-
-        // Try to set selected text (replaces selection, or inserts at cursor)
-        let setResult = AXUIElementSetAttributeValue(
-            axElement,
+        let result = AXUIElementSetAttributeValue(
+            focused,
             kAXSelectedTextAttribute as CFString,
             text as CFTypeRef
         )
-
-        if setResult == .success {
-            return true
-        }
-
-        // Try setting the value directly (for simple text fields)
-        var currentValue: AnyObject?
-        AXUIElementCopyAttributeValue(axElement, kAXValueAttribute as CFString, &currentValue)
-
-        if let current = currentValue as? String {
-            let newValue = current + text
-            let result = AXUIElementSetAttributeValue(
-                axElement,
-                kAXValueAttribute as CFString,
-                newValue as CFTypeRef
-            )
-            return result == .success
-        }
-
-        return false
+        return result == .success
     }
 
-    // MARK: - Clipboard paste method (universal fallback)
+    // MARK: - Clipboard + Cmd+V
 
-    private static func insertViaClipboard(_ text: String) {
-        // Save current clipboard
+    private static func pasteViaClipboard(_ text: String) {
         let pasteboard = NSPasteboard.general
-        let previousContents = pasteboard.string(forType: .string)
+        let oldContents = pasteboard.string(forType: .string)
 
-        // Set our text
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        // Simulate Cmd+V
-        simulatePaste()
+        simulateCmdV()
 
-        // Restore clipboard after a short delay
-        if let previous = previousContents {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Restore old clipboard after 400ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if let old = oldContents {
                 pasteboard.clearContents()
-                pasteboard.setString(previous, forType: .string)
+                pasteboard.setString(old, forType: .string)
             }
         }
     }
 
-    private static func simulatePaste() {
-        let source = CGEventSource(stateID: .hidSystemState)
+    private static func simulateCmdV() {
+        guard let src = CGEventSource(stateID: .hidSystemState) else { return }
 
-        // Key down: Cmd + V
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)  // V key
-        keyDown?.flags = .maskCommand
-        keyDown?.post(tap: .cgAnnotatedSessionEventTap)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
+        down?.flags = .maskCommand
+        down?.post(tap: .cgAnnotatedSessionEventTap)
 
-        // Key up
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-        keyUp?.flags = .maskCommand
-        keyUp?.post(tap: .cgAnnotatedSessionEventTap)
+        let up = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
+        up?.flags = .maskCommand
+        up?.post(tap: .cgAnnotatedSessionEventTap)
+    }
+
+    // MARK: - Permission
+
+    @discardableResult
+    static func requestAccessibilityIfNeeded() -> Bool {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        return AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 }

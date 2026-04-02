@@ -20,8 +20,6 @@ class HotkeyManager: ObservableObject {
 
     func setup() {
         // KeyboardShortcuts registers via Carbon API — no Accessibility needed
-        print("[Yap] Hotkey registered — no Accessibility needed")
-        print("[Yap] Push-to-talk: Option+Space (default)")
     }
 
     private func setupHandlers() {

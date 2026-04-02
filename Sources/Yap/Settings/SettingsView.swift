@@ -1,92 +1,150 @@
 import SwiftUI
 import KeyboardShortcuts
+import ServiceManagement
 
 struct SettingsView: View {
-    @EnvironmentObject var appState: AppState
-    @AppStorage("claudeApiKey") private var claudeApiKey = ""
+    // Provider
+    @AppStorage("sttProvider") private var sttProvider = STTProviderType.groq.rawValue
+    @AppStorage("groqApiKey") private var groqApiKey = ""
+    @AppStorage("openaiApiKey") private var openaiApiKey = ""
+    @AppStorage("deepgramApiKey") private var deepgramApiKey = ""
+
+    // Language
+    @AppStorage("sttLanguage") private var sttLanguage = STTLanguage.auto.rawValue
+
+    // Behavior
+    @AppStorage("autoPaste") private var autoPaste = true
     @AppStorage("launchAtLogin") private var launchAtLogin = false
+
+    private var selectedProvider: STTProviderType {
+        STTProviderType(rawValue: sttProvider) ?? .groq
+    }
 
     var body: some View {
         TabView {
             generalTab
                 .tabItem { Label("General", systemImage: "gear") }
-            aboutTab
-                .tabItem { Label("About", systemImage: "info.circle") }
+
+            providerTab
+                .tabItem { Label("Provider", systemImage: "cloud") }
+
+            hotkeyTab
+                .tabItem { Label("Hotkey", systemImage: "keyboard") }
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 460, height: 340)
     }
 
-    // MARK: - General
+    // MARK: - General Tab
 
     private var generalTab: some View {
         Form {
-            Section("Hotkey") {
-                KeyboardShortcuts.Recorder("Push-to-talk key", name: .pushToTalk)
-                Text("Hold to record, release to transcribe and paste")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Default Mode") {
-                Picker("Transcription mode", selection: $appState.currentMode) {
-                    ForEach(TranscriptionMode.allCases) { mode in
-                        HStack {
-                            Image(systemName: mode.icon)
-                            Text(mode.rawValue)
-                            Text("— \(mode.description)")
-                                .foregroundStyle(.secondary)
+            Section("Behavior") {
+                Toggle("Auto-paste into active text field", isOn: $autoPaste)
+                    .onChange(of: autoPaste) { _, newValue in
+                        if newValue {
+                            TextInserter.requestAccessibilityIfNeeded()
                         }
-                        .tag(mode)
                     }
-                }
-                .pickerStyle(.radioGroup)
-            }
 
-            Section("Smart Mode (Claude API)") {
-                SecureField("Claude API key", text: $claudeApiKey)
-                    .textFieldStyle(.roundedBorder)
-                Text("Optional. Used in Smart mode for context-aware formatting.")
+                Text("When enabled, transcriptions are pasted directly into the app you're using.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Startup") {
-                Toggle("Launch at login", isOn: $launchAtLogin)
+            Section("System") {
+                Toggle("Launch at Login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        do {
+                            if newValue {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            print("[Yap] Launch at login error: \(error)")
+                        }
+                    }
+            }
+
+            Section("History") {
+                Button("Clear All Transcriptions") {
+                    AppState.shared.transcriptions.removeAll()
+                }
+                .foregroundStyle(.red)
             }
         }
         .formStyle(.grouped)
         .padding()
     }
 
-    // MARK: - About
+    // MARK: - Provider Tab
 
-    private var aboutTab: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
+    private var providerTab: some View {
+        Form {
+            Section("Speech-to-Text Provider") {
+                Picker("Provider", selection: $sttProvider) {
+                    ForEach(STTProviderType.allCases) { provider in
+                        VStack(alignment: .leading) {
+                            Text(provider.rawValue)
+                        }
+                        .tag(provider.rawValue)
+                    }
+                }
+                .pickerStyle(.radioGroup)
 
-            Text("Yap")
-                .font(.title)
-                .fontWeight(.bold)
+                Text(selectedProvider.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-            Text("v0.2.0")
-                .foregroundStyle(.secondary)
+            Section("API Key — \(selectedProvider.rawValue)") {
+                switch selectedProvider {
+                case .groq:
+                    SecureField("gsk_...", text: $groqApiKey)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Get a free key at console.groq.com")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .openai:
+                    SecureField("sk-proj-...", text: $openaiApiKey)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Get a key at platform.openai.com")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .deepgram:
+                    SecureField("dg_...", text: $deepgramApiKey)
+                        .textFieldStyle(.roundedBorder)
+                    Text("$200 free credits at deepgram.com")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
-            Text("Push-to-talk dictation for Mac")
-                .font(.callout)
-
-            Text("Apple Speech • Vi/En support • Local + Fast")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Link("GitHub: sonpiaz/yap",
-                 destination: URL(string: "https://github.com/sonpiaz/yap")!)
-                .font(.caption)
+            Section("Language") {
+                Picker("Language", selection: $sttLanguage) {
+                    ForEach(STTLanguage.allCases) { lang in
+                        Text(lang.rawValue).tag(lang.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
         }
+        .formStyle(.grouped)
         .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Hotkey Tab
+
+    private var hotkeyTab: some View {
+        Form {
+            Section("Push-to-Talk") {
+                KeyboardShortcuts.Recorder("Hotkey", name: .pushToTalk)
+                Text("Hold to record, release to transcribe and paste")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
     }
 }
