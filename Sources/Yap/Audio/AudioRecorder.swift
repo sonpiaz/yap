@@ -1,237 +1,116 @@
 import AVFoundation
-import Combine
-import os.log
+import Foundation
 
-private let logger = Logger(subsystem: "com.sonpiaz.yap", category: "AudioRecorder")
-
-class AudioRecorder: ObservableObject {
+/// Records audio from the mic into a Float32 buffer at 16kHz mono (for Whisper).
+/// Thread-safe: tap callback writes on audio thread, stopRecording reads on main.
+final class AudioRecorder {
     static let shared = AudioRecorder()
 
-    private var audioEngine: AVAudioEngine?
-    private var audioBuffer: [Float] = []
-    private let bufferLock = NSLock()
+    private var engine: AVAudioEngine?
+    private var buffer: [Float] = []
+    private let lock = NSLock()
 
-    @Published var audioLevel: Float = 0.0
-    @Published var selectedInputID: String?
+    /// Current RMS audio level (0…1), updated from the tap callback.
+    @Published var audioLevel: Float = 0
 
-    private init() {
-        let saved = UserDefaults.standard.string(forKey: "preferredInputDeviceID") ?? ""
-        if !saved.isEmpty {
-            selectedInputID = saved
-        }
-    }
+    private init() {}
 
-    struct InputDevice: Identifiable, Hashable {
-        let id: String
-        let name: String
-        let deviceID: AudioDeviceID
-    }
-
-    func availableInputDevices() -> [InputDevice] {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var dataSize: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize) == noErr else {
-            return []
-        }
-
-        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
-        var deviceIDs = Array(repeating: AudioDeviceID(), count: count)
-
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize, &deviceIDs) == noErr else {
-            return []
-        }
-
-        return deviceIDs.compactMap { deviceID in
-            guard deviceHasInput(deviceID) else { return nil }
-            let name = deviceName(deviceID) ?? "Unknown Input"
-            return InputDevice(id: String(deviceID), name: name, deviceID: deviceID)
-        }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
+    // MARK: - Public
 
     func startRecording() throws {
-        let engine = AVAudioEngine()
-        self.audioEngine = engine
+        let eng = AVAudioEngine()
+        self.engine = eng                       // assign FIRST
 
-        if let selectedInputID,
-           let deviceID = AudioDeviceID(selectedInputID) {
-            try setInputDevice(deviceID)
+        let inputNode = eng.inputNode
+        let hwFormat = inputNode.outputFormat(forBus: 0)
+
+        guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            self.engine = nil
+            throw RecorderError.badFormat
         }
+        NSLog("[Yap] Mic format: %.0fHz, %dch", hwFormat.sampleRate, hwFormat.channelCount)
 
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            self.audioEngine = nil
-            throw AudioError.formatError
-        }
-
-        NSLog("[Yap] Mic format: \(format.sampleRate)Hz, \(format.channelCount)ch")
-
-        // Ensure 16kHz mono for Whisper
-        guard let convertFormat = AVAudioFormat(
+        guard let whisperFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16000,
             channels: 1,
             interleaved: false
         ) else {
-            throw AudioError.formatError
+            self.engine = nil
+            throw RecorderError.badFormat
         }
 
-        guard let converter = AVAudioConverter(from: format, to: convertFormat) else {
-            throw AudioError.converterError
+        guard let converter = AVAudioConverter(from: hwFormat, to: whisperFormat) else {
+            self.engine = nil
+            throw RecorderError.converterFailed
         }
 
-        bufferLock.lock()
-        audioBuffer.removeAll()
-        bufferLock.unlock()
+        lock.lock()
+        buffer.removeAll()
+        lock.unlock()
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            guard let self = self else { return }
-
-            // Convert to 16kHz mono
-            let frameCount = AVAudioFrameCount(
-                Double(buffer.frameLength) * 16000.0 / format.sampleRate
-            )
-            guard let convertedBuffer = AVAudioPCMBuffer(
-                pcmFormat: convertFormat,
-                frameCapacity: frameCount
-            ) else { return }
-
-            var error: NSError?
-            let status = converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                outStatus.pointee = .haveData
-                return buffer
-            }
-
-            guard status != .error, error == nil else { return }
-
-            if let channelData = convertedBuffer.floatChannelData?[0] {
-                let frames = Int(convertedBuffer.frameLength)
-                let rawSamples = Array(UnsafeBufferPointer(start: channelData, count: frames))
-                let processedSamples = self.applyNoiseSuppressionIfNeeded(to: rawSamples)
-
-                self.bufferLock.lock()
-                self.audioBuffer.append(contentsOf: processedSamples)
-                self.bufferLock.unlock()
-
-                // Calculate RMS for audio level
-                let rms = sqrt(processedSamples.reduce(0) { $0 + $1 * $1 } / Float(max(frames, 1)))
-                DispatchQueue.main.async {
-                    self.audioLevel = min(1.0, rms * 10)
-                }
-            }
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] pcm, _ in
+            self?.processTapBuffer(pcm, converter: converter, targetFormat: whisperFormat)
         }
 
-        engine.prepare()
-        try engine.start()
-        NSLog("[Yap] Audio engine started successfully")
+        eng.prepare()
+        try eng.start()
+        NSLog("[Yap] Recording started")
     }
 
+    /// Stops recording and returns the accumulated 16kHz mono samples.
     func stopRecording() -> [Float] {
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
 
-        bufferLock.lock()
-        let samples = audioBuffer
-        audioBuffer.removeAll()
-        bufferLock.unlock()
+        lock.lock()
+        let samples = buffer
+        buffer.removeAll()
+        lock.unlock()
 
-        DispatchQueue.main.async {
-            self.audioLevel = 0.0
-        }
-
+        DispatchQueue.main.async { self.audioLevel = 0 }
+        NSLog("[Yap] Recording stopped, %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
         return samples
     }
 
-    func runMicrophoneTest(duration: TimeInterval = 2.0) {
-        Task { @MainActor in
-            do {
-                try startRecording()
-                DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-                    _ = self.stopRecording()
-                }
-            } catch {
-                NSLog("[Yap] Mic test failed: \(error)")
-            }
+    // MARK: - Private
+
+    private func processTapBuffer(_ pcm: AVAudioPCMBuffer, converter: AVAudioConverter, targetFormat: AVAudioFormat) {
+        let ratio = 16000.0 / pcm.format.sampleRate
+        let frameCount = AVAudioFrameCount(Double(pcm.frameLength) * ratio)
+        guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else { return }
+
+        var error: NSError?
+        converter.convert(to: converted, error: &error) { _, outStatus in
+            outStatus.pointee = .haveData
+            return pcm
         }
-    }
+        guard error == nil, let data = converted.floatChannelData?[0] else { return }
 
-    private func applyNoiseSuppressionIfNeeded(to samples: [Float]) -> [Float] {
-        let isEnabled = UserDefaults.standard.bool(forKey: "noiseSuppression")
-        guard isEnabled else { return samples }
+        let count = Int(converted.frameLength)
+        let samples = Array(UnsafeBufferPointer(start: data, count: count))
 
-        let gateThreshold: Float = 0.015
-        let attenuation: Float = 0.15
-        return samples.map { sample in
-            abs(sample) < gateThreshold ? sample * attenuation : sample
+        lock.lock()
+        buffer.append(contentsOf: samples)
+        lock.unlock()
+
+        // RMS for level meter
+        let rms = sqrt(samples.reduce(0) { $0 + $1 * $1 } / max(Float(count), 1))
+        DispatchQueue.main.async {
+            self.audioLevel = min(1.0, rms * 10)
         }
-    }
-
-    private func setInputDevice(_ deviceID: AudioDeviceID) throws {
-        guard let audioUnit = audioEngine?.inputNode.audioUnit else {
-            NSLog("[Yap] setInputDevice failed: audioEngine or audioUnit is nil")
-            throw AudioError.inputDeviceUnavailable
-        }
-        NSLog("[Yap] Setting input device to ID: \(deviceID)")
-
-        var mutableDeviceID = deviceID
-        let status = AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &mutableDeviceID,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-
-        if status != noErr {
-            throw AudioError.inputDeviceUnavailable
-        }
-    }
-
-    private func deviceHasInput(_ deviceID: AudioDeviceID) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreams,
-            mScope: kAudioDevicePropertyScopeInput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var dataSize: UInt32 = 0
-        let status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize)
-        return status == noErr && dataSize > 0
-    }
-
-    private func deviceName(_ deviceID: AudioDeviceID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioObjectPropertyName,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var name: CFString = "" as CFString
-        var dataSize = UInt32(MemoryLayout<CFString>.size)
-        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &name)
-        return status == noErr ? (name as String) : nil
     }
 }
 
-enum AudioError: LocalizedError {
-    case formatError
-    case converterError
-    case permissionDenied
-    case inputDeviceUnavailable
+enum RecorderError: LocalizedError {
+    case badFormat
+    case converterFailed
 
     var errorDescription: String? {
         switch self {
-        case .formatError: return "Failed to create audio format"
-        case .converterError: return "Failed to create audio converter"
-        case .permissionDenied: return "Microphone access denied"
-        case .inputDeviceUnavailable: return "Selected input device is unavailable"
+        case .badFormat: return "Invalid audio format"
+        case .converterFailed: return "Could not create audio converter"
         }
     }
 }

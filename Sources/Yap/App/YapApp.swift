@@ -3,60 +3,31 @@ import SwiftUI
 @main
 struct YapApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var state = AppState.shared
+    @StateObject private var appState = AppState.shared
 
     var body: some Scene {
         MenuBarExtra {
             ContentView()
-                .frame(width: 380, height: 440)
+                .environmentObject(appState)
+                .frame(width: 360, height: 400)
         } label: {
-            Label("Yap", systemImage: menuBarIcon)
+            Label("Yap", systemImage: appState.menuBarIcon)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
-            SettingsView()
-        }
-    }
-
-    private var menuBarIcon: String {
-        if state.isRecording {
-            return "record.circle.fill"
-        } else if state.isTranscribing {
-            return "ellipsis.circle"
-        } else {
-            return "waveform.circle"
+            Text("Settings coming soon")
+                .frame(width: 400, height: 300)
         }
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Register defaults FIRST
-        UserDefaults.standard.register(defaults: [
-            "autoPaste": true,
-            "outputMode": OutputMode.pasteOnly.rawValue,
-            "sttProvider": STTProviderType.groq.rawValue,
-            "sttLanguage": STTLanguage.auto.rawValue,
-            "recordingMode": RecordingMode.holdToTalk.rawValue,
-            "noiseSuppression": true,
-        ])
-
-        if UserDefaults.standard.string(forKey: "pushToTalkTriggerData") == nil {
-            PushToTalkTrigger.saveToDefaults(.defaultValue)
-        }
-
-        // Setup hotkey
-        HotkeyManager.shared.setup()
-
-        // Request Accessibility for auto-paste (non-blocking)
-        if UserDefaults.standard.bool(forKey: "autoPaste") {
-            TextInserter.requestAccessibilityIfNeeded()
-        }
+        NSLog("[Yap] App launched")
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return false
+        false
     }
-
 }

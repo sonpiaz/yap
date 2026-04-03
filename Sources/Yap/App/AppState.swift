@@ -7,25 +7,26 @@ struct Transcription: Identifiable {
 }
 
 @MainActor
-class AppState: ObservableObject {
+final class AppState: ObservableObject {
     static let shared = AppState()
 
     @Published var isRecording = false
     @Published var isTranscribing = false
-    @Published var recordingDuration: TimeInterval = 0
     @Published var audioLevel: Float = 0
+    @Published var recordingDuration: TimeInterval = 0
     @Published var error: String?
     @Published var transcriptions: [Transcription] = []
-    @Published var isMicTestRunning = false
-    @Published var showRecordingOverlay = false
+    @Published var showOverlay = false
 
     private init() {}
 
-    func addTranscription(_ text: String) {
-        let entry = Transcription(text: text, timestamp: Date())
-        transcriptions.insert(entry, at: 0)
+    var menuBarIcon: String {
+        if isRecording { return "record.circle.fill" }
+        if isTranscribing { return "ellipsis.circle" }
+        return "waveform.circle"
+    }
 
-        // Auto-paste or copy to clipboard
-        TextInserter.insert(text)
+    func addTranscription(_ text: String) {
+        transcriptions.insert(Transcription(text: text, timestamp: Date()), at: 0)
     }
 }
