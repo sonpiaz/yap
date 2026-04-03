@@ -108,6 +108,13 @@ Pull requests welcome. For major changes, please open an issue first.
 4. Push (`git push origin feat/amazing-feature`)
 5. Open a Pull Request
 
+## Related
+
+- [Kapt](https://github.com/sonpiaz/kapt) — macOS screenshot tool with annotation & OCR
+- [hidrix-tools](https://github.com/sonpiaz/hidrix-tools) — MCP server for web & social search
+- [affiliate-skills](https://github.com/Affitor/affiliate-skills) — 45 AI agent skills
+- [evox](https://github.com/sonpiaz/evox) — Multi-agent orchestration system
+
 ## License
 
 [MIT](LICENSE) — Son Piaz
