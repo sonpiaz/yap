@@ -16,6 +16,8 @@ class AppState: ObservableObject {
     @Published var audioLevel: Float = 0
     @Published var error: String?
     @Published var transcriptions: [Transcription] = []
+    @Published var isMicTestRunning = false
+    @Published var showRecordingOverlay = false
 
     private init() {}
 

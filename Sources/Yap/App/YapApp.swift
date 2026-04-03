@@ -35,9 +35,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Register defaults FIRST
         UserDefaults.standard.register(defaults: [
             "autoPaste": true,
+            "outputMode": OutputMode.pasteOnly.rawValue,
             "sttProvider": STTProviderType.groq.rawValue,
             "sttLanguage": STTLanguage.auto.rawValue,
+            "recordingMode": RecordingMode.holdToTalk.rawValue,
+            "noiseSuppression": true,
         ])
+
+        if UserDefaults.standard.string(forKey: "pushToTalkTriggerData") == nil {
+            PushToTalkTrigger.saveToDefaults(.defaultValue)
+        }
 
         // Setup hotkey
         HotkeyManager.shared.setup()
@@ -51,4 +58,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
+
 }

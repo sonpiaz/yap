@@ -4,48 +4,56 @@ struct ContentView: View {
     @ObservedObject private var state = AppState.shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Transcription list
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        if state.transcriptions.isEmpty {
-                            VStack(spacing: 12) {
-                                Spacer(minLength: 60)
-                                Image(systemName: "waveform.circle")
-                                    .font(.system(size: 48))
-                                    .foregroundStyle(.secondary.opacity(0.5))
-                                Text("Press ⌥Space and speak")
-                                    .font(.headline)
-                                    .foregroundStyle(.secondary)
-                                Text("Your transcriptions will appear here")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
+        ZStack {
+            VStack(spacing: 0) {
+                // Transcription list
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            if state.transcriptions.isEmpty {
+                                VStack(spacing: 12) {
+                                    Spacer(minLength: 60)
+                                    Image(systemName: "waveform.circle")
+                                        .font(.system(size: 48))
+                                        .foregroundStyle(.secondary.opacity(0.5))
+                                    Text("Hold your shortcut and speak")
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
+                                    Text("Your transcriptions will appear here")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            .frame(maxWidth: .infinity)
-                        }
 
-                        ForEach(state.transcriptions) { entry in
-                            TranscriptionRow(entry: entry)
-                                .id(entry.id)
+                            ForEach(state.transcriptions) { entry in
+                                TranscriptionRow(entry: entry)
+                                    .id(entry.id)
+                            }
+                        }
+                        .padding()
+                    }
+                    .onChange(of: state.transcriptions.count) {
+                        if let first = state.transcriptions.first {
+                            withAnimation {
+                                proxy.scrollTo(first.id, anchor: .top)
+                            }
                         }
                     }
-                    .padding()
                 }
-                .onChange(of: state.transcriptions.count) {
-                    if let first = state.transcriptions.first {
-                        withAnimation {
-                            proxy.scrollTo(first.id, anchor: .top)
-                        }
-                    }
-                }
+
+                Divider()
+
+                // Status bar
+                StatusBar(state: state)
             }
 
-            Divider()
-
-            // Status bar
-            StatusBar(state: state)
+            if state.showRecordingOverlay || state.isRecording {
+                RecordingOverlay(state: state)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
         }
+        .animation(.easeInOut(duration: 0.18), value: state.showRecordingOverlay)
         .frame(minWidth: 300, minHeight: 200)
     }
 }
@@ -139,7 +147,7 @@ struct StatusBar: View {
                 Image(systemName: "waveform.circle")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                Text("⌥Space to record")
+                Text("Hold your shortcut to record")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -167,5 +175,57 @@ struct StatusBar: View {
     private func formatDuration(_ duration: TimeInterval) -> String {
         let seconds = Int(duration)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+struct RecordingOverlay: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.black.opacity(0.28))
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 78, height: 78)
+
+                    Image(systemName: state.isRecording ? "waveform.circle.fill" : "waveform.circle")
+                        .font(.system(size: 34))
+                        .foregroundStyle(state.isRecording ? .red : .secondary)
+                }
+
+                Text("Listening…")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+
+                HStack(spacing: 3) {
+                    ForEach(0..<12, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(.white.opacity(0.9))
+                            .frame(width: 4, height: overlayBarHeight(index: i))
+                    }
+                }
+                .frame(height: 28)
+                .animation(.easeInOut(duration: 0.08), value: state.audioLevel)
+
+                Text("Release the shortcut to stop")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
+            .shadow(radius: 18)
+        }
+    }
+
+    private func overlayBarHeight(index: Int) -> CGFloat {
+        let level = CGFloat(max(state.audioLevel, 0.05))
+        let variation = sin(Double(index) * 0.75) * 0.28 + 0.72
+        return max(6, level * 28 * CGFloat(variation))
     }
 }

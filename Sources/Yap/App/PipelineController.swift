@@ -8,6 +8,7 @@ class PipelineController: ObservableObject {
     private let recorder = AudioRecorder.shared
     private let state = AppState.shared
     private var durationTimer: Timer?
+    private var micTestStopWorkItem: DispatchWorkItem?
 
     private init() {}
 
@@ -17,6 +18,7 @@ class PipelineController: ObservableObject {
         do {
             try recorder.startRecording()
             state.isRecording = true
+            state.showRecordingOverlay = true
             state.recordingDuration = 0
             state.error = nil
             
@@ -36,6 +38,7 @@ class PipelineController: ObservableObject {
 
         let samples = recorder.stopRecording()
         state.isRecording = false
+        state.showRecordingOverlay = false
         durationTimer?.invalidate()
         durationTimer = nil
         
@@ -71,8 +74,32 @@ class PipelineController: ObservableObject {
         if state.isRecording {
             _ = recorder.stopRecording()
             state.isRecording = false
+            state.showRecordingOverlay = false
             durationTimer?.invalidate()
             durationTimer = nil
-                    }
+        }
+    }
+
+    func toggleRecording() {
+        if state.isRecording {
+            stopAndTranscribe()
+        } else {
+            startRecording()
+        }
+    }
+
+    func startMicTest(duration: TimeInterval = 2.0) {
+        guard !state.isRecording, !state.isMicTestRunning else { return }
+
+        state.isMicTestRunning = true
+        startRecording()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.cancelRecording()
+            self.state.isMicTestRunning = false
+        }
+        micTestStopWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
     }
 }

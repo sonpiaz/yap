@@ -6,10 +6,12 @@ Push-to-talk dictation for macOS. Hold a hotkey, speak, and text gets transcribe
 
 ## Features
 
-- **Push-to-talk** — Hold `⌥Space` (customizable) to record, release to transcribe
-- **Auto-paste** — Transcribed text is automatically inserted at your cursor
+- **Push-to-talk or toggle mode** — Hold `⌥Space` to record, or press once to start/stop
+- **Flexible output** — Auto-paste or copy-only, with optional Enter-after-paste
 - **Multi-provider STT** — Groq (Whisper v3 Turbo), OpenAI (Whisper-1), Deepgram (Nova-3)
 - **Vietnamese + English** — Auto-detect or lock to a specific language
+- **Recording controls** — Microphone selector, noise suppression, live input meter, mic test
+- **Permission status** — Check microphone and accessibility access from Settings
 - **Menu bar app** — Lives in your menu bar, always ready
 - **Transcription history** — Copy any previous transcription with one click
 
