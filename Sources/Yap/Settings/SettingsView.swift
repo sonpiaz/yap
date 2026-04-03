@@ -5,6 +5,7 @@ import ApplicationServices
 struct SettingsView: View {
     @AppStorage("openaiApiKey") private var apiKey = ""
     @AppStorage("transcriptionMode") private var modeRaw = TranscriptionMode.normal.rawValue
+    @AppStorage("soundEnabled") private var soundEnabled = true
     @State private var micPermission = false
     @State private var axPermission = false
     @State private var inputMonitoring = false
@@ -47,6 +48,10 @@ struct SettingsView: View {
                 }
                 Text("Hold to record, release to transcribe")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("System") {
+                Toggle("Sound feedback", isOn: $soundEnabled)
             }
 
             Section("Permissions") {

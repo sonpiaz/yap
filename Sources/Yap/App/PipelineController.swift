@@ -75,10 +75,13 @@ final class PipelineController {
         state.isRecording = true
         state.showOverlay = true
         state.recordingDuration = 0
+        FloatingBarController.shared.show()
         state.error = nil
         recordingStartTime = Date()
 
-        SoundFeedback.shared.playStartTone()
+        if UserDefaults.standard.bool(forKey: "soundEnabled") {
+            SoundFeedback.shared.playStartTone()
+        }
 
         durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -100,6 +103,7 @@ final class PipelineController {
 
         state.isRecording = false
         state.showOverlay = false
+        FloatingBarController.shared.hide()
 
         // Too short — cancel
         if duration < minimumDuration {
@@ -121,7 +125,9 @@ final class PipelineController {
             return
         }
 
-        SoundFeedback.shared.playStopTone()
+        if UserDefaults.standard.bool(forKey: "soundEnabled") {
+            SoundFeedback.shared.playStopTone()
+        }
 
         NSLog("[Yap] Transcribing %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
         state.isTranscribing = true
@@ -155,6 +161,7 @@ final class PipelineController {
         _ = recorder.stopRecording()
         state.isRecording = false
         state.showOverlay = false
+        FloatingBarController.shared.hide()
         durationTimer?.invalidate()
         durationTimer = nil
     }

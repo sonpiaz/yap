@@ -25,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: ["soundEnabled": true])
         NSLog("[Yap] App launched")
         NSApplication.shared.setActivationPolicy(.regular)
         PipelineController.shared.setup()

@@ -34,6 +34,24 @@ final class AppState: ObservableObject {
         return "waveform.circle"
     }
 
+    var totalWords: Int {
+        transcriptions.reduce(0) { $0 + $1.text.split(separator: " ").count }
+    }
+
+    var groupedByDate: [(key: String, value: [Transcription])] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: transcriptions) { entry -> String in
+            if cal.isDateInToday(entry.timestamp) { return "Today" }
+            if cal.isDateInYesterday(entry.timestamp) { return "Yesterday" }
+            let f = DateFormatter()
+            f.dateFormat = "MMMM d, yyyy"
+            return f.string(from: entry.timestamp)
+        }
+        return grouped.sorted { a, b in
+            (a.value.first?.timestamp ?? .distantPast) > (b.value.first?.timestamp ?? .distantPast)
+        }
+    }
+
     func addTranscription(_ text: String) {
         transcriptions.insert(Transcription(text: text), at: 0)
         if transcriptions.count > 200 { transcriptions = Array(transcriptions.prefix(200)) }
