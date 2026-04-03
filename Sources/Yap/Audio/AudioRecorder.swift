@@ -1,5 +1,8 @@
 import AVFoundation
 import Combine
+import os.log
+
+private let logger = Logger(subsystem: "com.sonpiaz.yap", category: "AudioRecorder")
 
 class AudioRecorder: ObservableObject {
     static let shared = AudioRecorder()
@@ -11,7 +14,12 @@ class AudioRecorder: ObservableObject {
     @Published var audioLevel: Float = 0.0
     @Published var selectedInputID: String?
 
-    private init() {}
+    private init() {
+        let saved = UserDefaults.standard.string(forKey: "preferredInputDeviceID") ?? ""
+        if !saved.isEmpty {
+            selectedInputID = saved
+        }
+    }
 
     struct InputDevice: Identifiable, Hashable {
         let id: String
@@ -48,6 +56,8 @@ class AudioRecorder: ObservableObject {
 
     func startRecording() throws {
         let engine = AVAudioEngine()
+        self.audioEngine = engine
+
         if let selectedInputID,
            let deviceID = AudioDeviceID(selectedInputID) {
             try setInputDevice(deviceID)
@@ -55,6 +65,13 @@ class AudioRecorder: ObservableObject {
 
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
+
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            self.audioEngine = nil
+            throw AudioError.formatError
+        }
+
+        NSLog("[Yap] Mic format: \(format.sampleRate)Hz, \(format.channelCount)ch")
 
         // Ensure 16kHz mono for Whisper
         guard let convertFormat = AVAudioFormat(
@@ -113,7 +130,7 @@ class AudioRecorder: ObservableObject {
 
         engine.prepare()
         try engine.start()
-        self.audioEngine = engine
+        NSLog("[Yap] Audio engine started successfully")
     }
 
     func stopRecording() -> [Float] {
@@ -141,7 +158,7 @@ class AudioRecorder: ObservableObject {
                     _ = self.stopRecording()
                 }
             } catch {
-                print("[Yap] Mic test failed: \(error)")
+                NSLog("[Yap] Mic test failed: \(error)")
             }
         }
     }
@@ -159,8 +176,10 @@ class AudioRecorder: ObservableObject {
 
     private func setInputDevice(_ deviceID: AudioDeviceID) throws {
         guard let audioUnit = audioEngine?.inputNode.audioUnit else {
+            NSLog("[Yap] setInputDevice failed: audioEngine or audioUnit is nil")
             throw AudioError.inputDeviceUnavailable
         }
+        NSLog("[Yap] Setting input device to ID: \(deviceID)")
 
         var mutableDeviceID = deviceID
         let status = AudioUnitSetProperty(
