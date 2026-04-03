@@ -1,6 +1,9 @@
 import Cocoa
 import Combine
 import ApplicationServices
+import os.log
+
+private let hmLogger = Logger(subsystem: "com.sonpiaz.yap", category: "HotkeyManager")
 
 enum RecordingMode: String, CaseIterable, Identifiable {
     case holdToTalk = "Hold to Talk"
@@ -48,8 +51,10 @@ class HotkeyManager: ObservableObject {
     }
 
     private func setupHandlers() {
-        guard PermissionManager.shared.inputMonitoringStatus == .granted || CGPreflightListenEventAccess() else {
-            print("[Yap] Input Monitoring not granted")
+        let hasPerm = CGPreflightListenEventAccess()
+        NSLog("[Yap] setupHandlers called, CGPreflightListenEventAccess=%d", hasPerm ? 1 : 0)
+        guard PermissionManager.shared.inputMonitoringStatus == .granted || hasPerm else {
+            NSLog("[Yap] Input Monitoring not granted")
             return
         }
 
@@ -60,7 +65,7 @@ class HotkeyManager: ObservableObject {
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passRetained(event) }
             let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-            manager.handle(cgEvent: event, type: type)
+            manager.handleFromTap(cgEvent: event, type: type)
             return Unmanaged.passRetained(event)
         }
 
@@ -83,23 +88,34 @@ class HotkeyManager: ObservableObject {
             CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
+        NSLog("[Yap] CGEventTap created and enabled successfully")
     }
 
-    private func handle(cgEvent: CGEvent, type: CGEventType) {
+    nonisolated func handleFromTap(cgEvent: CGEvent, type: CGEventType) {
+        NSLog("[Yap] event received type: %u, flags raw: %llu", type.rawValue, cgEvent.flags.rawValue)
+        let flagsRaw = cgEvent.flags.rawValue
+        let keycode = cgEvent.getIntegerValueField(.keyboardEventKeycode)
+        let autorepeat = cgEvent.getIntegerValueField(.keyboardEventAutorepeat)
+        DispatchQueue.main.async {
+            self.dispatchEvent(type: type, flagsRaw: flagsRaw, keycode: keycode, autorepeat: autorepeat)
+        }
+    }
+
+    private func dispatchEvent(type: CGEventType, flagsRaw: UInt64, keycode: Int64, autorepeat: Int64) {
         switch type {
         case .flagsChanged:
-            handleFlagsChanged(cgEvent)
+            handleFlagsChanged(flagsRaw: flagsRaw)
         case .keyDown:
-            handleKeyDownEvent(cgEvent)
+            handleKeyDownEvent(flagsRaw: flagsRaw, keycode: keycode, autorepeat: autorepeat)
         case .keyUp:
-            handleKeyUpEvent(cgEvent)
+            handleKeyUpEvent(flagsRaw: flagsRaw, keycode: keycode)
         default:
             break
         }
     }
 
-    private func handleFlagsChanged(_ event: CGEvent) {
-        let newFlags = normalizedFlags(NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue)))
+    private func handleFlagsChanged(flagsRaw: UInt64) {
+        let newFlags = normalizedFlags(NSEvent.ModifierFlags(rawValue: UInt(flagsRaw)))
         let oldFlags = currentFlags
         currentFlags = newFlags
 
@@ -119,25 +135,25 @@ class HotkeyManager: ObservableObject {
         }
     }
 
-    private func handleKeyDownEvent(_ event: CGEvent) {
+    private func handleKeyDownEvent(flagsRaw: UInt64, keycode: Int64, autorepeat: Int64) {
         guard trigger.kind == .combo else { return }
-        guard matchesCombo(event) else { return }
-        if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+        guard matchesCombo(flagsRaw: flagsRaw, keycode: keycode) else { return }
+        if autorepeat == 0 {
             handleKeyDown()
         }
     }
 
-    private func handleKeyUpEvent(_ event: CGEvent) {
+    private func handleKeyUpEvent(flagsRaw: UInt64, keycode: Int64) {
         guard trigger.kind == .combo else { return }
         guard let keyCode = trigger.keyCode,
-              UInt16(event.getIntegerValueField(.keyboardEventKeycode)) == keyCode else { return }
+              UInt16(keycode) == keyCode else { return }
         handleKeyUp()
     }
 
-    private func matchesCombo(_ event: CGEvent) -> Bool {
+    private func matchesCombo(flagsRaw: UInt64, keycode: Int64) -> Bool {
         guard let keyCode = trigger.keyCode else { return false }
-        guard UInt16(event.getIntegerValueField(.keyboardEventKeycode)) == keyCode else { return false }
-        let flags = normalizedFlags(NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue)))
+        guard UInt16(keycode) == keyCode else { return false }
+        let flags = normalizedFlags(NSEvent.ModifierFlags(rawValue: UInt(flagsRaw)))
         let expected = NSEvent.ModifierFlags(trigger.modifiers.map(\.eventFlag))
         return flags == expected
     }
@@ -149,6 +165,7 @@ class HotkeyManager: ObservableObject {
     private func handleKeyDown() {
         guard !isHotkeyDown else { return }
         isHotkeyDown = true
+        NSLog("[Yap] handleKeyDown → startRecording, mode: %@", recordingMode.rawValue)
 
         switch recordingMode {
         case .holdToTalk:
@@ -166,6 +183,7 @@ class HotkeyManager: ObservableObject {
     private func handleKeyUp() {
         guard isHotkeyDown else { return }
         isHotkeyDown = false
+        NSLog("[Yap] handleKeyUp → stopRecording")
 
         guard recordingMode == .holdToTalk else { return }
 
