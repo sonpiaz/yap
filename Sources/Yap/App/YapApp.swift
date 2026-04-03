@@ -24,7 +24,14 @@ struct YapApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[Yap] App launched")
+        NSApplication.shared.setActivationPolicy(.regular)
         PipelineController.shared.setup()
+    }
+
+    /// Click dock icon → open Settings directly
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

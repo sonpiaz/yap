@@ -19,7 +19,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Yap needs microphone access to transcribe your speech.</string>
 </dict>
