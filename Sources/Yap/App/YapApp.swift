@@ -25,6 +25,7 @@ struct YapApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[Yap] App launched")
+        PipelineController.shared.setup()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
