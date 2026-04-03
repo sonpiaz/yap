@@ -1,12 +1,27 @@
-# Yap
+<h1 align="center">Yap</h1>
 
-Push-to-talk dictation for macOS. Hold a hotkey, speak, text appears.
+<p align="center">
+  Push-to-talk dictation for macOS. Hold a hotkey, speak, text appears.
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](https://www.apple.com/macos/)
-[![Swift](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org/)
+<p align="center">
+  <a href="https://github.com/sonpiaz/yap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/sonpiaz/yap" alt="License" /></a>
+  <a href="https://github.com/sonpiaz/yap/stargazers"><img src="https://img.shields.io/github/stars/sonpiaz/yap" alt="Stars" /></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-black" alt="macOS 14+" />
+  <img src="https://img.shields.io/badge/Swift-5.9-orange" alt="Swift 5.9" />
+</p>
 
-Yap is a menu bar app that transcribes speech to text in real-time using cloud STT providers. Hold a hotkey, speak, and the transcription is pasted directly into any app. Supports Vietnamese and English with auto-detection.
+---
+
+## Features
+
+- **Push-to-talk** — Hold `⌥Space` to record, or press once to toggle
+- **Auto-paste** — Transcribed text is pasted directly into the active app
+- **Multi-provider STT** — Groq (Whisper v3 Turbo), OpenAI (Whisper-1), Deepgram (Nova-3)
+- **Vietnamese + English** — Auto-detect or lock to a specific language
+- **Recording controls** — Mic selector, noise suppression, live input meter, mic test
+- **Transcription history** — Copy any previous transcription with one click
+- **Menu bar app** — Always ready, no dock icon
 
 ## Install
 
@@ -32,19 +47,6 @@ make run
 3. Choose STT provider and language
 4. Hold `⌥Space` and speak
 
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Push-to-talk** | Hold `⌥Space` to record, or press once to toggle |
-| **Auto-paste** | Transcribed text is pasted directly into the active app |
-| **Multi-provider STT** | Groq (Whisper v3 Turbo), OpenAI (Whisper-1), Deepgram (Nova-3) |
-| **Vietnamese + English** | Auto-detect or lock to a specific language |
-| **Recording controls** | Mic selector, noise suppression, live input meter, mic test |
-| **Transcription history** | Copy any previous transcription with one click |
-| **Permission status** | Check mic and accessibility access from Settings |
-| **Menu bar app** | Always ready, no dock icon |
-
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
@@ -52,14 +54,9 @@ make run
 - Accessibility permission (for auto-paste)
 - Microphone permission
 
-## Permissions
+## Privacy
 
-Yap requests two permissions at runtime:
-
-1. **Microphone** — Required to capture audio for transcription
-2. **Accessibility** — Required to paste transcribed text into the active app
-
-Grant them in System Settings → Privacy & Security.
+Yap sends audio data **only** to the STT provider you choose for transcription. No audio is stored locally or sent anywhere else. API keys are stored in UserDefaults on your Mac.
 
 ## Development
 
@@ -80,41 +77,33 @@ Sources/Yap/
 ├── Input/                    — Hotkey management, text insertion
 ├── Settings/                 — Settings UI
 └── History/                  — Transcription history
-
-Resources/
-├── Info.plist
-├── Yap.entitlements
-└── Assets.xcassets
 ```
 
 ## Tech Stack
 
-- **Language:** Swift 5.9 / SwiftUI
-- **Audio:** AVFoundation
-- **STT:** Cloud APIs (Groq, OpenAI, Deepgram)
-- **Build:** XcodeGen + xcodebuild
-
-## Privacy
-
-Yap sends audio data **only** to the STT provider you choose (Groq, OpenAI, or Deepgram) for transcription. No audio is stored locally or sent anywhere else. API keys are stored in UserDefaults on your Mac.
+| Technology | Purpose |
+|-----------|---------|
+| [Swift 5.9](https://swift.org/) | Language |
+| SwiftUI | UI framework |
+| AVFoundation | Audio capture |
+| Cloud STT APIs | Groq, OpenAI, Deepgram |
+| [XcodeGen](https://github.com/yonaskolb/XcodeGen) | Project generation |
 
 ## Contributing
 
-Pull requests welcome. For major changes, please open an issue first.
-
-1. Fork the repo
-2. Create your branch (`git checkout -b feat/amazing-feature`)
-3. Commit (`git commit -m 'feat: add amazing feature'`)
-4. Push (`git push origin feat/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Related
 
 - [Kapt](https://github.com/sonpiaz/kapt) — macOS screenshot tool with annotation & OCR
 - [hidrix-tools](https://github.com/sonpiaz/hidrix-tools) — MCP server for web & social search
 - [affiliate-skills](https://github.com/Affitor/affiliate-skills) — 45 AI agent skills
-- [evox](https://github.com/sonpiaz/evox) — Multi-agent orchestration system
+- [content-pipeline](https://github.com/Affitor/content-pipeline) — AI-powered LinkedIn content generation
 
 ## License
 
-[MIT](LICENSE) — Son Piaz
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">Built by <a href="https://github.com/sonpiaz">Son Piaz</a></p>
