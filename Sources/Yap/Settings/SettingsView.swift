@@ -48,8 +48,9 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 420)
         .onAppear {
-            if preferredInputDeviceID.isEmpty, let first = inputDevices.first {
-                preferredInputDeviceID = first.id
+            // Fallback if saved device no longer exists
+            if preferredInputDeviceID.isEmpty || !inputDevices.contains(where: { $0.id == preferredInputDeviceID }) {
+                preferredInputDeviceID = inputDevices.first?.id ?? ""
             }
             recorder.selectedInputID = preferredInputDeviceID.isEmpty ? nil : preferredInputDeviceID
             permissions.refresh()
