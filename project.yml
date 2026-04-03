@@ -11,9 +11,10 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Sources
-    resources:
-      - Resources
+      - path: Sources
+      - path: Resources/Assets.xcassets
+        type: file
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sonpiaz.yap

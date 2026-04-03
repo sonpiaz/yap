@@ -15,13 +15,6 @@ struct YapApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("Yap", id: "main") {
-            ContentView()
-                .environmentObject(appState)
-                .frame(minWidth: 380, minHeight: 500)
-        }
-        .defaultSize(width: 400, height: 550)
-
         Settings {
             SettingsView()
         }
@@ -29,6 +22,8 @@ struct YapApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var mainWindow: NSWindow?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[Yap] App launched")
         NSApplication.shared.setActivationPolicy(.regular)
@@ -37,23 +32,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Click dock icon → open main window
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            // No visible windows → open main window
-            for window in NSApp.windows {
-                if window.title == "Yap" || window.identifier?.rawValue.contains("main") == true {
-                    window.makeKeyAndOrderFront(nil)
-                    NSApp.activate(ignoringOtherApps: true)
-                    return true
-                }
-            }
-            // Fallback: open settings
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
+        showMainWindow()
         return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private func showMainWindow() {
+        if let window = mainWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let contentView = ContentView()
+            .environmentObject(AppState.shared)
+            .frame(minWidth: 380, minHeight: 500)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 550),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Yap"
+        window.contentView = NSHostingView(rootView: contentView)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        mainWindow = window
     }
 }
