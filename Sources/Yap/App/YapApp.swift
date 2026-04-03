@@ -3,14 +3,15 @@ import SwiftUI
 @main
 struct YapApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var state = AppState.shared
+    @StateObject private var appState = AppState.shared
 
     var body: some Scene {
         MenuBarExtra {
             ContentView()
-                .frame(width: 380, height: 440)
+                .environmentObject(appState)
+                .frame(width: 360, height: 400)
         } label: {
-            Label("Yap", systemImage: menuBarIcon)
+            Label("Yap", systemImage: appState.menuBarIcon)
         }
         .menuBarExtraStyle(.window)
 
@@ -18,45 +19,60 @@ struct YapApp: App {
             SettingsView()
         }
     }
-
-    private var menuBarIcon: String {
-        if state.isRecording {
-            return "record.circle.fill"
-        } else if state.isTranscribing {
-            return "ellipsis.circle"
-        } else {
-            return "waveform.circle"
-        }
-    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var mainWindow: NSWindow?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Register defaults FIRST
-        UserDefaults.standard.register(defaults: [
-            "autoPaste": true,
-            "outputMode": OutputMode.pasteOnly.rawValue,
-            "sttProvider": STTProviderType.groq.rawValue,
-            "sttLanguage": STTLanguage.auto.rawValue,
-            "recordingMode": RecordingMode.holdToTalk.rawValue,
-            "noiseSuppression": true,
-        ])
+        UserDefaults.standard.register(defaults: ["soundEnabled": true])
+        NSLog("[Yap] App launched")
+        NSApplication.shared.setActivationPolicy(.regular)
 
-        if UserDefaults.standard.string(forKey: "pushToTalkTriggerData") == nil {
-            PushToTalkTrigger.saveToDefaults(.defaultValue)
+        // Apply saved hotkey
+        let choice = UserDefaults.standard.string(forKey: "hotkeyChoice") ?? "command"
+        switch choice {
+        case "option": HotkeyManager.shared.targetModifier = .maskAlternate
+        case "control": HotkeyManager.shared.targetModifier = .maskControl
+        case "fn": HotkeyManager.shared.targetModifier = .maskSecondaryFn
+        default: HotkeyManager.shared.targetModifier = .maskCommand
         }
 
-        // Setup hotkey
-        HotkeyManager.shared.setup()
+        PipelineController.shared.setup()
+    }
 
-        // Request Accessibility for auto-paste (non-blocking)
-        if UserDefaults.standard.bool(forKey: "autoPaste") {
-            TextInserter.requestAccessibilityIfNeeded()
-        }
+    /// Click dock icon → open main window
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return false
+        false
     }
 
+    private func showMainWindow() {
+        if let window = mainWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let contentView = MainView()
+            .environmentObject(AppState.shared)
+            .frame(minWidth: 500, minHeight: 450)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 500),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Yap"
+        window.contentView = NSHostingView(rootView: contentView)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        mainWindow = window
+    }
 }

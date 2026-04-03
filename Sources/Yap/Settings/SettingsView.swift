@@ -1,400 +1,259 @@
 import SwiftUI
-import ServiceManagement
+import AVFoundation
+import ApplicationServices
 
 struct SettingsView: View {
-    @ObservedObject private var state = AppState.shared
-    @ObservedObject private var recorder = AudioRecorder.shared
-    @ObservedObject private var permissions = PermissionManager.shared
-
-    // Provider
-    @AppStorage("sttProvider") private var sttProvider = STTProviderType.groq.rawValue
-    @AppStorage("groqApiKey") private var groqApiKey = ""
-    @AppStorage("openaiApiKey") private var openaiApiKey = ""
-    @AppStorage("deepgramApiKey") private var deepgramApiKey = ""
-
-    // Language
-    @AppStorage("sttLanguage") private var sttLanguage = STTLanguage.auto.rawValue
-
-    // Behavior
-    @AppStorage("outputMode") private var outputMode = OutputMode.pasteOnly.rawValue
-    @AppStorage("autoPaste") private var autoPaste = true
+    @AppStorage("openaiApiKey") private var apiKey = ""
+    @AppStorage("transcriptionMode") private var modeRaw = TranscriptionMode.normal.rawValue
+    @AppStorage("soundEnabled") private var soundEnabled = true
+    @AppStorage("muteMusic") private var muteMusic = false
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @AppStorage("recordingMode") private var recordingMode = RecordingMode.holdToTalk.rawValue
-    @AppStorage("noiseSuppression") private var noiseSuppression = true
-    @AppStorage("preferredInputDeviceID") private var preferredInputDeviceID = ""
-    @State private var pushToTalkTrigger = PushToTalkTrigger.loadFromDefaults()
-
-    private var selectedProvider: STTProviderType {
-        STTProviderType(rawValue: sttProvider) ?? .groq
-    }
-
-    private var inputDevices: [AudioRecorder.InputDevice] {
-        recorder.availableInputDevices()
-    }
+    @AppStorage("hotkeyChoice") private var hotkeyChoice = "command"
+    @State private var micPermission = false
+    @State private var axPermission = false
+    @State private var inputMonitoring = false
+    @State private var newWord = ""
+    @State private var snippetTrigger = ""
+    @State private var snippetExpansion = ""
 
     var body: some View {
-        TabView {
-            generalTab
-                .tabItem { Label("General", systemImage: "gear") }
-
-            providerTab
-                .tabItem { Label("Provider", systemImage: "cloud") }
-
-            recordingTab
-                .tabItem { Label("Recording", systemImage: "mic") }
-
-            hotkeyTab
-                .tabItem { Label("Hotkey", systemImage: "keyboard") }
+        Form {
+            apiSection
+            modeSection
+            hotkeySection
+            dictionarySection
+            snippetSection
+            systemSection
+            permissionSection
         }
-        .frame(width: 520, height: 420)
-        .onAppear {
-            // Fallback if saved device no longer exists
-            if preferredInputDeviceID.isEmpty || !inputDevices.contains(where: { $0.id == preferredInputDeviceID }) {
-                preferredInputDeviceID = inputDevices.first?.id ?? ""
-            }
-            recorder.selectedInputID = preferredInputDeviceID.isEmpty ? nil : preferredInputDeviceID
-            permissions.refresh()
-            migrateLegacyOutputSettingIfNeeded()
-            pushToTalkTrigger = PushToTalkTrigger.loadFromDefaults()
+        .formStyle(.grouped)
+        .onAppear { refreshPermissions() }
+    }
+
+    // MARK: - Sections
+
+    private var apiSection: some View {
+        Section("OpenAI API Key") {
+            SecureField("sk-...", text: $apiKey)
+                .textFieldStyle(.roundedBorder)
+            Text("Uses gpt-4o-transcribe — best for Vietnamese + English")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    // MARK: - General Tab
-
-    private var generalTab: some View {
-        Form {
-            Section("Permissions") {
-                VStack(alignment: .leading, spacing: 12) {
-                    permissionCard(
-                        title: "Microphone",
-                        detail: "Required to record your voice.",
-                        status: permissions.microphoneStatus,
-                        actionTitle: permissions.microphoneStatus == .granted ? "Refresh" : "Request Access"
-                    ) {
-                        if permissions.microphoneStatus == .granted {
-                            permissions.refresh()
-                        } else {
-                            permissions.requestMicrophoneAccess()
-                        }
-                    }
-
-                    permissionCard(
-                        title: "Accessibility",
-                        detail: "Needed for pasting text into the active app.",
-                        status: permissions.accessibilityStatus,
-                        actionTitle: permissions.accessibilityStatus == .granted ? "Refresh" : "Request Access"
-                    ) {
-                        if permissions.accessibilityStatus == .granted {
-                            permissions.refresh()
-                        } else {
-                            permissions.requestAccessibilityAccess()
-                        }
-                    }
-
-                    permissionCard(
-                        title: "Input Monitoring",
-                        detail: "Required for global push-to-talk shortcuts like Option or Command.",
-                        status: permissions.inputMonitoringStatus,
-                        actionTitle: permissions.inputMonitoringStatus == .granted ? "Refresh" : "Open Settings"
-                    ) {
-                        if permissions.inputMonitoringStatus == .granted {
-                            permissions.refresh()
-                        } else {
-                            permissions.openInputMonitoringSettings()
-                        }
-                    }
+    private var modeSection: some View {
+        Section("Transcription Mode") {
+            Picker("Mode", selection: $modeRaw) {
+                ForEach(TranscriptionMode.allCases) { mode in
+                    Label(mode.rawValue, systemImage: mode.icon).tag(mode.rawValue)
                 }
             }
+            .pickerStyle(.segmented)
+            Text(currentMode.description)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
 
-            Section("Output") {
-                Picker("Output Mode", selection: $outputMode) {
-                    ForEach(OutputMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode.rawValue)
-                    }
-                }
-                .onChange(of: outputMode) { _, newValue in
-                    autoPaste = (newValue != OutputMode.copyOnly.rawValue)
-                    if newValue != OutputMode.copyOnly.rawValue {
-                        TextInserter.requestAccessibilityIfNeeded()
-                    }
-                }
+    private var hotkeySection: some View {
+        Section("Hotkey") {
+            Picker("Push-to-talk key", selection: $hotkeyChoice) {
+                Text("⌘ Command").tag("command")
+                Text("⌥ Option").tag("option")
+                Text("⌃ Control").tag("control")
+                Text("fn Globe").tag("fn")
+            }
+            .onChange(of: hotkeyChoice) { _, newValue in
+                applyHotkey(newValue)
+            }
+            Text("Hold to record, release to transcribe")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
 
-                outputModeSummary
+    private var dictionarySection: some View {
+        Section("Custom Dictionary") {
+            HStack {
+                TextField("Add word (name, term...)", text: $newWord)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addWord() }
+                Button("Add") { addWord() }
+                    .disabled(newWord.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
-            Section("System") {
-                Toggle("Launch at Login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, newValue in
-                        do {
-                            if newValue {
-                                try SMAppService.mainApp.register()
-                            } else {
-                                try SMAppService.mainApp.unregister()
+            let words = CustomDictionary.words
+            if words.isEmpty {
+                Text("Add names or terms the model gets wrong")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                FlowLayout(spacing: 6) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { i, word in
+                        HStack(spacing: 4) {
+                            Text(word).font(.caption)
+                            Button {
+                                CustomDictionary.remove(at: i)
+                            } label: {
+                                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
                             }
-                        } catch {
-                            print("[Yap] Launch at login error: \(error)")
+                            .buttonStyle(.plain)
                         }
-                    }
-            }
-
-            Section("History") {
-                Button("Clear All Transcriptions") {
-                    AppState.shared.transcriptions.removeAll()
-                }
-                .foregroundStyle(.red)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    // MARK: - Provider Tab
-
-    private var providerTab: some View {
-        Form {
-            Section("Speech-to-Text Provider") {
-                Picker("Provider", selection: $sttProvider) {
-                    ForEach(STTProviderType.allCases) { provider in
-                        VStack(alignment: .leading) {
-                            Text(provider.rawValue)
-                        }
-                        .tag(provider.rawValue)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-
-                Text(selectedProvider.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("API Key — \(selectedProvider.rawValue)") {
-                switch selectedProvider {
-                case .groq:
-                    SecureField("gsk_...", text: $groqApiKey)
-                        .textFieldStyle(.roundedBorder)
-                    Text("Get a free key at console.groq.com")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                case .openai:
-                    SecureField("sk-proj-...", text: $openaiApiKey)
-                        .textFieldStyle(.roundedBorder)
-                    Text("Get a key at platform.openai.com")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                case .deepgram:
-                    SecureField("dg_...", text: $deepgramApiKey)
-                        .textFieldStyle(.roundedBorder)
-                    Text("$200 free credits at deepgram.com")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Language") {
-                Picker("Language", selection: $sttLanguage) {
-                    ForEach(STTLanguage.allCases) { lang in
-                        Text(lang.rawValue).tag(lang.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    // MARK: - Recording Tab
-
-    private var recordingTab: some View {
-        Form {
-            Section("Mode") {
-                Picker("Recording Mode", selection: $recordingMode) {
-                    ForEach(RecordingMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text((RecordingMode(rawValue: recordingMode) ?? .holdToTalk).description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Audio Input") {
-                Picker("Microphone", selection: $preferredInputDeviceID) {
-                    ForEach(inputDevices) { device in
-                        Text(device.name).tag(device.id)
-                    }
-                }
-                .onChange(of: preferredInputDeviceID) { _, newValue in
-                    recorder.selectedInputID = newValue.isEmpty ? nil : newValue
-                }
-
-                Toggle("Noise suppression", isOn: $noiseSuppression)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Input level")
-                        Spacer()
-                        Text(state.isMicTestRunning ? "Testing…" : "Live")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ProgressView(value: Double(state.audioLevel), total: 1.0)
-                        .progressViewStyle(.linear)
-                        .tint(state.audioLevel > 0.8 ? .red : .accentColor)
-
-                    Button(state.isMicTestRunning ? "Testing microphone…" : "Test Microphone") {
-                        PipelineController.shared.startMicTest()
-                    }
-                    .disabled(state.isMicTestRunning || state.isRecording)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    // MARK: - Hotkey Tab
-
-    private var hotkeyTab: some View {
-        Form {
-            Section("Shortcut") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Push to talk")
-                        .font(.headline)
-
-                    TriggerRecorderField(trigger: $pushToTalkTrigger)
-                        .onChange(of: pushToTalkTrigger) { _, _ in
-                            HotkeyManager.shared.setup()
-                        }
-
-                    HStack {
-                        Button("Use Command") {
-                            pushToTalkTrigger = .modifier(.command)
-                            PushToTalkTrigger.saveToDefaults(pushToTalkTrigger)
-                            HotkeyManager.shared.setup()
-                        }
-                        .controlSize(.small)
-
-                        Button("Use Option") {
-                            pushToTalkTrigger = .modifier(.option)
-                            PushToTalkTrigger.saveToDefaults(pushToTalkTrigger)
-                            HotkeyManager.shared.setup()
-                        }
-                        .controlSize(.small)
-
-                        Spacer()
-
-                        Button("Reset to Default") {
-                            pushToTalkTrigger = .defaultValue
-                            PushToTalkTrigger.saveToDefaults(pushToTalkTrigger)
-                            HotkeyManager.shared.setup()
-                        }
-                        .controlSize(.small)
-                    }
-
-                    if permissions.inputMonitoringStatus != .granted {
-                        Label("Input Monitoring must be enabled for push-to-talk to work outside the app.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-
-                    Text(hotkeyHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    private var hotkeyHint: String {
-        let mode = RecordingMode(rawValue: recordingMode) ?? .holdToTalk
-        switch mode {
-        case .holdToTalk:
-            return "Hold to record, release to transcribe and paste"
-        case .toggle:
-            return "Press once to start recording, press again to stop and transcribe"
-        }
-    }
-
-    private var outputModeSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(
-                currentOutputMode.description,
-                systemImage: currentOutputMode == .copyOnly ? "doc.on.doc" : "arrow.right.circle.fill"
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if currentOutputMode == .pasteAndSubmit {
-                Label("Best for chat boxes and prompts that submit on Enter.", systemImage: "paperplane")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if currentOutputMode != .copyOnly && permissions.accessibilityStatus != .granted {
-                Label("Accessibility permission is needed for paste actions.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    private var currentOutputMode: OutputMode {
-        OutputMode(rawValue: outputMode) ?? .pasteOnly
-    }
-
-    @ViewBuilder
-    private func permissionCard(title: String, detail: String, status: PermissionManager.Status, actionTitle: String, action: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: status.symbolName)
-                .foregroundStyle(statusColor(for: status))
-                .font(.title3)
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(title)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Text(status.rawValue)
-                        .font(.caption)
-                        .foregroundStyle(statusColor(for: status))
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(statusColor(for: status).opacity(0.12), in: Capsule())
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: Capsule())
+                    }
                 }
+            }
+        }
+    }
 
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var snippetSection: some View {
+        Section("Snippets") {
+            HStack {
+                TextField("Trigger", text: $snippetTrigger)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
+                Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                TextField("Expansion text", text: $snippetExpansion)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add") {
+                    guard !snippetTrigger.isEmpty, !snippetExpansion.isEmpty else { return }
+                    SnippetManager.add(Snippet(trigger: snippetTrigger, expansion: snippetExpansion))
+                    snippetTrigger = ""
+                    snippetExpansion = ""
+                }
             }
 
-            Button(actionTitle, action: action)
-                .controlSize(.small)
+            let snips = SnippetManager.snippets
+            if snips.isEmpty {
+                Text("Say a trigger word → expands to full text")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(snips) { snippet in
+                    HStack {
+                        Text(snippet.trigger).fontWeight(.medium)
+                        Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                        Text(snippet.expansion).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        Button { SnippetManager.remove(id: snippet.id) } label: {
+                            Image(systemName: "trash").font(.caption).foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func statusColor(for status: PermissionManager.Status) -> Color {
-        switch status {
-        case .granted:
-            return .green
-        case .denied:
-            return .orange
-        case .unknown:
-            return .secondary
+    private var systemSection: some View {
+        Section("System") {
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, newValue in
+                    LaunchAtLogin.set(enabled: newValue)
+                }
+            Toggle("Sound feedback", isOn: $soundEnabled)
+            Toggle("Mute music while dictating", isOn: $muteMusic)
         }
     }
 
-    private func migrateLegacyOutputSettingIfNeeded() {
-        if UserDefaults.standard.string(forKey: "outputMode") == nil {
-            outputMode = autoPaste ? OutputMode.pasteOnly.rawValue : OutputMode.copyOnly.rawValue
+    private var permissionSection: some View {
+        Section("Permissions") {
+            permissionRow("Microphone", granted: micPermission) {
+                AVCaptureDevice.requestAccess(for: .audio) { _ in
+                    DispatchQueue.main.async { refreshPermissions() }
+                }
+            }
+            permissionRow("Accessibility", granted: axPermission) {
+                let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                _ = AXIsProcessTrustedWithOptions(opts as CFDictionary)
+                refreshPermissions()
+            }
+            permissionRow("Input Monitoring", granted: inputMonitoring) {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
+    }
+
+    // MARK: - Helpers
+
+    private var currentMode: TranscriptionMode {
+        TranscriptionMode(rawValue: modeRaw) ?? .normal
+    }
+
+    private func addWord() {
+        CustomDictionary.add(newWord)
+        newWord = ""
+    }
+
+    private func applyHotkey(_ choice: String) {
+        let mgr = HotkeyManager.shared
+        switch choice {
+        case "option": mgr.targetModifier = .maskAlternate
+        case "control": mgr.targetModifier = .maskControl
+        case "fn": mgr.targetModifier = .maskSecondaryFn
+        default: mgr.targetModifier = .maskCommand
+        }
+        mgr.start()
+        NSLog("[Yap] Hotkey changed to: %@", choice)
+    }
+
+    private func permissionRow(_ title: String, granted: Bool, action: @escaping () -> Void) -> some View {
+        HStack {
+            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(granted ? .green : .red)
+            Text(title)
+            Spacer()
+            if !granted {
+                Button("Grant") { action() }.buttonStyle(.bordered).controlSize(.small)
+            } else {
+                Text("Granted").foregroundStyle(.secondary).font(.caption)
+            }
+        }
+    }
+
+    private func refreshPermissions() {
+        micPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        axPermission = AXIsProcessTrusted()
+        inputMonitoring = CGPreflightListenEventAccess()
+    }
+}
+
+// MARK: - Flow Layout (tag cloud for dictionary words)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = layout(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = layout(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+
+        return (CGSize(width: maxWidth, height: y + rowHeight), positions)
     }
 }

@@ -1,105 +1,175 @@
-import Foundation
 import AppKit
+import Combine
 
+/// Connects HotkeyManager → AudioRecorder → STT → TextInserter.
+/// All methods run on @MainActor.
 @MainActor
-class PipelineController: ObservableObject {
+final class PipelineController {
     static let shared = PipelineController()
 
     private let recorder = AudioRecorder.shared
     private let state = AppState.shared
     private var durationTimer: Timer?
-    private var micTestStopWorkItem: DispatchWorkItem?
+    private var levelCancellable: AnyCancellable?
+    private var recordingStartTime: Date?
+    private let minimumDuration: TimeInterval = 0.3
 
-    private init() {}
+    private init() {
+        // Bridge AudioRecorder.audioLevel → AppState.audioLevel
+        levelCancellable = recorder.$audioLevel
+            .receive(on: RunLoop.main)
+            .assign(to: \.audioLevel, on: state)
+    }
 
-    func startRecording() {
-        guard !state.isRecording else { return }
+    // MARK: - Setup
 
+    func setup() {
+        let hotkey = HotkeyManager.shared
+        hotkey.onModifierDown = { [weak self] in
+            // Start buffering audio immediately (before 200ms grace period)
+            Task { @MainActor in self?.preRecording() }
+        }
+        hotkey.onKeyDown = { [weak self] in
+            // Grace period passed — confirm recording
+            Task { @MainActor in self?.confirmRecording() }
+        }
+        hotkey.onKeyUp = { [weak self] in
+            Task { @MainActor in self?.stopRecording() }
+        }
+        hotkey.onCancelled = { [weak self] in
+            // Cmd+C/V detected — cancel pre-recording
+            Task { @MainActor in self?.cancelRecording() }
+        }
+        hotkey.start()
+        NSLog("[Yap] Pipeline ready")
+    }
+
+    // MARK: - Recording
+
+    /// Step 1: Command pressed — start mic immediately (captures audio from the very start)
+    private var isPreRecording = false
+
+    func preRecording() {
+        guard !state.isRecording, !isPreRecording else { return }
         do {
             try recorder.startRecording()
-            state.isRecording = true
-            state.showRecordingOverlay = true
-            state.recordingDuration = 0
-            state.error = nil
-            
-            durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    self?.state.recordingDuration += 0.1
-                    self?.state.audioLevel = self?.recorder.audioLevel ?? 0
-                }
-            }
+            isPreRecording = true
         } catch {
             state.error = "Mic error: \(error.localizedDescription)"
         }
     }
 
-    func stopAndTranscribe() {
+    /// Step 2: 200ms passed, no other key — confirm this is a solo hold
+    func confirmRecording() {
+        guard isPreRecording || !state.isRecording else { return }
+        isPreRecording = false
+
+        // If preRecording didn't start (no mic), try now
+        if recorder.isRunning == false {
+            do { try recorder.startRecording() } catch {
+                state.error = "Mic error: \(error.localizedDescription)"
+                return
+            }
+        }
+
+        state.isRecording = true
+        state.showOverlay = true
+        state.recordingDuration = 0
+        FloatingBarController.shared.show()
+        MediaController.pauseIfPlaying()
+        state.error = nil
+        recordingStartTime = Date()
+
+        if UserDefaults.standard.bool(forKey: "soundEnabled") {
+            SoundFeedback.shared.playStartTone()
+        }
+
+        durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.state.recordingDuration += 0.1
+            }
+        }
+    }
+
+    func stopRecording() {
         guard state.isRecording else { return }
 
-        let samples = recorder.stopRecording()
-        state.isRecording = false
-        state.showRecordingOverlay = false
+        let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        recordingStartTime = nil
         durationTimer?.invalidate()
         durationTimer = nil
-        
-        // Need at least 0.5s of audio
-        guard samples.count > 8000 else {
-            state.error = "Too short"
+
+        let samples = recorder.stopRecording()
+
+        state.isRecording = false
+        state.showOverlay = false
+        FloatingBarController.shared.hide()
+        MediaController.resumeIfPaused()
+
+        // Too short — cancel
+        if duration < minimumDuration {
+            NSLog("[Yap] Recording too short (%.2fs), cancelled", duration)
             return
         }
 
+        // Need at least 0.5s of audio (8000 samples at 16kHz)
+        guard samples.count > 8000 else {
+            state.error = "Too short to transcribe"
+            return
+        }
+
+        // Silence detection — skip if audio is too quiet (no speech)
+        let rms = sqrt(samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count))
+        NSLog("[Yap] Audio RMS: %.5f", rms)
+        guard rms > 0.005 else {
+            NSLog("[Yap] Too quiet, skipping transcription")
+            return
+        }
+
+        if UserDefaults.standard.bool(forKey: "soundEnabled") {
+            SoundFeedback.shared.playStopTone()
+        }
+
+        NSLog("[Yap] Transcribing %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
         state.isTranscribing = true
-                NSSound(named: "Pop")?.play()
 
         Task {
             do {
-                let text = try await STTProvider.transcribe(audioSamples: samples)
-
+                let text = try await STTProvider.transcribe(samples)
                 guard !text.isEmpty else {
                     state.isTranscribing = false
-                                        return
+                    return
                 }
-
-                state.addTranscription(text)
+                // Apply snippets
+                let finalText = SnippetManager.applySnippets(to: text)
+                NSLog("[Yap] Transcribed: %@", finalText)
                 state.isTranscribing = false
-                
+                state.addTranscription(finalText)
+                TextInserter.insert(finalText)
+                let wordCount = text.split(separator: " ").count
+                let duration = Double(samples.count) / 16000.0
+                UsageTracker.recordTranscription(wordCount: wordCount, durationSeconds: duration)
             } catch {
                 state.isTranscribing = false
                 state.error = error.localizedDescription
-                            }
+                NSLog("[Yap] Transcription error: %@", error.localizedDescription)
+            }
         }
     }
 
     func cancelRecording() {
-        if state.isRecording {
+        if isPreRecording {
             _ = recorder.stopRecording()
-            state.isRecording = false
-            state.showRecordingOverlay = false
-            durationTimer?.invalidate()
-            durationTimer = nil
+            isPreRecording = false
         }
-    }
-
-    func toggleRecording() {
-        if state.isRecording {
-            stopAndTranscribe()
-        } else {
-            startRecording()
-        }
-    }
-
-    func startMicTest(duration: TimeInterval = 2.0) {
-        guard !state.isRecording, !state.isMicTestRunning else { return }
-
-        state.isMicTestRunning = true
-        startRecording()
-
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.cancelRecording()
-            self.state.isMicTestRunning = false
-        }
-        micTestStopWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
+        guard state.isRecording else { return }
+        _ = recorder.stopRecording()
+        state.isRecording = false
+        state.showOverlay = false
+        FloatingBarController.shared.hide()
+        MediaController.resumeIfPaused()
+        durationTimer?.invalidate()
+        durationTimer = nil
     }
 }

@@ -1,72 +1,67 @@
 import Cocoa
-import Combine
-import ApplicationServices
-import os.log
+import CoreGraphics
 
-private let hmLogger = Logger(subsystem: "com.sonpiaz.yap", category: "HotkeyManager")
-
-enum RecordingMode: String, CaseIterable, Identifiable {
-    case holdToTalk = "Hold to Talk"
-    case toggle = "Toggle"
-
-    var id: String { rawValue }
-
-    var description: String {
-        switch self {
-        case .holdToTalk:
-            return "Hold the hotkey to record, release to transcribe"
-        case .toggle:
-            return "Press once to start recording, press again to stop and transcribe"
-        }
-    }
-}
-
-@MainActor
-class HotkeyManager: ObservableObject {
+/// Listens for a global modifier key (default: Command) via CGEventTap.
+///
+/// To avoid conflict with Cmd+C/V/Z shortcuts, we use a delayed-activation
+/// strategy: when Command is pressed alone, we wait a short grace period.
+/// If any other key is pressed during that window, we cancel.
+/// If Command is still held after the grace period with no other keys → activate.
+final class HotkeyManager {
     static let shared = HotkeyManager()
 
-    private var isHotkeyDown = false
-    private var recordingStartTime: Date?
-    private let minimumRecordingDuration: TimeInterval = 0.3
+    var onModifierDown: (() -> Void)?  // fires immediately when modifier pressed
+    var onKeyDown: (() -> Void)?        // fires after grace period (confirmed solo hold)
+    var onKeyUp: (() -> Void)?
+    var onCancelled: (() -> Void)?      // fires if Cmd+C/V detected (abort)
+
+    /// The modifier flag to listen for. Default = Command.
+    var targetModifier: CGEventFlags = .maskCommand
+
+    /// Grace period to distinguish solo-Command from Cmd+C etc.
+    private let activationDelay: TimeInterval = 0.20
+
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var currentFlags: NSEvent.ModifierFlags = []
+    private var tapCheckTimer: Timer?
 
-    private var recordingMode: RecordingMode {
-        let raw = UserDefaults.standard.string(forKey: "recordingMode") ?? RecordingMode.holdToTalk.rawValue
-        return RecordingMode(rawValue: raw) ?? .holdToTalk
-    }
+    private var isModifierDown = false   // physical state: modifier is held
+    private var isActivated = false      // logical state: recording triggered
+    private var activationWorkItem: DispatchWorkItem?
+    private var otherKeyPressed = false  // true if a non-modifier key was pressed during hold
 
-    private var trigger: PushToTalkTrigger {
-        PushToTalkTrigger.loadFromDefaults()
-    }
+    private init() {}
 
-    private init() {
-        setupHandlers()
-    }
+    // MARK: - Setup / Teardown
 
-    func setup() {
-        teardownMonitors()
-        setupHandlers()
-    }
+    func start() {
+        stop()
 
-    private func setupHandlers() {
-        let hasPerm = CGPreflightListenEventAccess()
-        NSLog("[Yap] setupHandlers called, CGPreflightListenEventAccess=%d", hasPerm ? 1 : 0)
-        guard PermissionManager.shared.inputMonitoringStatus == .granted || hasPerm else {
-            NSLog("[Yap] Input Monitoring not granted")
+        guard CGPreflightListenEventAccess() else {
+            NSLog("[Yap] Input Monitoring permission not granted")
             return
         }
 
-        let mask = (1 << CGEventType.flagsChanged.rawValue) |
-                   (1 << CGEventType.keyDown.rawValue) |
-                   (1 << CGEventType.keyUp.rawValue)
+        let mask: CGEventMask =
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.keyDown.rawValue)
 
-        let callback: CGEventTapCallBack = { _, type, event, refcon in
-            guard let refcon else { return Unmanaged.passRetained(event) }
-            let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-            manager.handleFromTap(cgEvent: event, type: type)
-            return Unmanaged.passRetained(event)
+        let callback: CGEventTapCallBack = { proxy, type, event, refcon in
+            guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
+            let mgr = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
+
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                NSLog("[Yap] CGEventTap was disabled, re-enabling")
+                if let tap = mgr.eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+                return Unmanaged.passUnretained(event)
+            }
+
+            if type == .keyDown {
+                mgr.handleKeyDown()
+            } else if type == .flagsChanged {
+                mgr.handleFlagsChanged(event.flags.rawValue)
+            }
+            return Unmanaged.passUnretained(event)
         }
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
@@ -74,154 +69,108 @@ class HotkeyManager: ObservableObject {
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
-            eventsOfInterest: CGEventMask(mask),
+            eventsOfInterest: mask,
             callback: callback,
             userInfo: refcon
         ) else {
-            print("[Yap] Failed to create CGEventTap")
+            NSLog("[Yap] Failed to create CGEventTap")
             return
         }
 
         eventTap = tap
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        if let runLoopSource {
-            CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        if let src = runLoopSource {
+            CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
-        NSLog("[Yap] CGEventTap created and enabled successfully")
-    }
+        NSLog("[Yap] CGEventTap started (modifier 0x%llx, delay %.0fms)", targetModifier.rawValue, activationDelay * 1000)
 
-    nonisolated func handleFromTap(cgEvent: CGEvent, type: CGEventType) {
-        NSLog("[Yap] event received type: %u, flags raw: %llu", type.rawValue, cgEvent.flags.rawValue)
-        let flagsRaw = cgEvent.flags.rawValue
-        let keycode = cgEvent.getIntegerValueField(.keyboardEventKeycode)
-        let autorepeat = cgEvent.getIntegerValueField(.keyboardEventAutorepeat)
+        // Re-enable tap if macOS disables it
         DispatchQueue.main.async {
-            self.dispatchEvent(type: type, flagsRaw: flagsRaw, keycode: keycode, autorepeat: autorepeat)
+            self.tapCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+                guard let self, let tap = self.eventTap else { return }
+                if !CGEvent.tapIsEnabled(tap: tap) {
+                    NSLog("[Yap] Re-enabling disabled CGEventTap")
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                }
+            }
         }
     }
 
-    private func dispatchEvent(type: CGEventType, flagsRaw: UInt64, keycode: Int64, autorepeat: Int64) {
-        switch type {
-        case .flagsChanged:
-            handleFlagsChanged(flagsRaw: flagsRaw)
-        case .keyDown:
-            handleKeyDownEvent(flagsRaw: flagsRaw, keycode: keycode, autorepeat: autorepeat)
-        case .keyUp:
-            handleKeyUpEvent(flagsRaw: flagsRaw, keycode: keycode)
-        default:
-            break
+    func stop() {
+        tapCheckTimer?.invalidate()
+        tapCheckTimer = nil
+        activationWorkItem?.cancel()
+        activationWorkItem = nil
+        if let src = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
+            runLoopSource = nil
         }
-    }
-
-    private func handleFlagsChanged(flagsRaw: UInt64) {
-        let newFlags = normalizedFlags(NSEvent.ModifierFlags(rawValue: UInt(flagsRaw)))
-        let oldFlags = currentFlags
-        currentFlags = newFlags
-
-        guard trigger.kind == .modifier, let modifier = trigger.modifier else { return }
-        let targetFlag = modifier.eventFlag
-
-        let wasPressed = oldFlags.contains(targetFlag)
-        let isPressed = newFlags.contains(targetFlag)
-        let onlyTargetPressed = newFlags == targetFlag
-        let targetReleased = wasPressed && !isPressed
-        let transitionedAwayFromTargetOnly = wasPressed && oldFlags == targetFlag && newFlags != targetFlag
-
-        if !wasPressed && isPressed && onlyTargetPressed {
-            handleKeyDown()
-        } else if targetReleased || transitionedAwayFromTargetOnly {
-            handleKeyUp()
+        if let tap = eventTap {
+            CFMachPortInvalidate(tap)
+            eventTap = nil
         }
+        isModifierDown = false
+        isActivated = false
     }
 
-    private func handleKeyDownEvent(flagsRaw: UInt64, keycode: Int64, autorepeat: Int64) {
-        guard trigger.kind == .combo else { return }
-        guard matchesCombo(flagsRaw: flagsRaw, keycode: keycode) else { return }
-        if autorepeat == 0 {
-            handleKeyDown()
-        }
-    }
+    // MARK: - Event Handling
 
-    private func handleKeyUpEvent(flagsRaw: UInt64, keycode: Int64) {
-        guard trigger.kind == .combo else { return }
-        guard let keyCode = trigger.keyCode,
-              UInt16(keycode) == keyCode else { return }
-        handleKeyUp()
-    }
-
-    private func matchesCombo(flagsRaw: UInt64, keycode: Int64) -> Bool {
-        guard let keyCode = trigger.keyCode else { return false }
-        guard UInt16(keycode) == keyCode else { return false }
-        let flags = normalizedFlags(NSEvent.ModifierFlags(rawValue: UInt(flagsRaw)))
-        let expected = NSEvent.ModifierFlags(trigger.modifiers.map(\.eventFlag))
-        return flags == expected
-    }
-
-    private func normalizedFlags(_ flags: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
-        flags.intersection([.command, .option, .control, .shift, .function])
-    }
-
+    /// A non-modifier key was pressed (C, V, Z, etc.) while modifier is held → it's a shortcut.
     private func handleKeyDown() {
-        guard !isHotkeyDown else { return }
-        isHotkeyDown = true
-        NSLog("[Yap] handleKeyDown → startRecording, mode: %@", recordingMode.rawValue)
-
-        switch recordingMode {
-        case .holdToTalk:
-            recordingStartTime = Date()
-            DispatchQueue.main.async {
-                PipelineController.shared.startRecording()
-            }
-        case .toggle:
-            DispatchQueue.main.async {
-                PipelineController.shared.toggleRecording()
-            }
+        if isModifierDown && !isActivated {
+            // Cancel the pending activation — this is Cmd+C, Cmd+V, etc.
+            otherKeyPressed = true
+            activationWorkItem?.cancel()
+            activationWorkItem = nil
+            DispatchQueue.main.async { self.onCancelled?() }
         }
     }
 
-    private func handleKeyUp() {
-        guard isHotkeyDown else { return }
-        isHotkeyDown = false
-        NSLog("[Yap] handleKeyUp → stopRecording")
+    private func handleFlagsChanged(_ rawFlags: UInt64) {
+        let targetRaw = targetModifier.rawValue
+        let isDown = (rawFlags & targetRaw) != 0
 
-        guard recordingMode == .holdToTalk else { return }
+        // Check no other modifiers are pressed
+        let allModifiers: UInt64 =
+            CGEventFlags.maskCommand.rawValue |
+            CGEventFlags.maskAlternate.rawValue |
+            CGEventFlags.maskControl.rawValue |
+            CGEventFlags.maskShift.rawValue
+        let otherModifiers = (rawFlags & allModifiers) & ~targetRaw
+        let hasOtherModifiers = otherModifiers != 0
 
-        let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
-        recordingStartTime = nil
+        if isDown && !isModifierDown && !hasOtherModifiers {
+            // Modifier pressed — start grace period
+            isModifierDown = true
+            otherKeyPressed = false
+            activationWorkItem?.cancel()
 
-        if duration >= minimumRecordingDuration {
-            DispatchQueue.main.async {
-                PipelineController.shared.stopAndTranscribe()
+            // Start mic buffering immediately
+            DispatchQueue.main.async { self.onModifierDown?() }
+
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.isModifierDown, !self.otherKeyPressed else { return }
+                // Grace period passed, no other key was pressed → activate!
+                self.isActivated = true
+                NSLog("[Yap] Hotkey ACTIVATED (solo hold confirmed)")
+                self.onKeyDown?()
             }
-        } else {
-            DispatchQueue.main.async {
-                PipelineController.shared.cancelRecording()
+            activationWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay, execute: work)
+
+        } else if !isDown && isModifierDown {
+            // Modifier released
+            isModifierDown = false
+            activationWorkItem?.cancel()
+            activationWorkItem = nil
+
+            if isActivated {
+                isActivated = false
+                NSLog("[Yap] Hotkey RELEASED")
+                DispatchQueue.main.async { self.onKeyUp?() }
             }
-        }
-    }
-
-    private func teardownMonitors() {
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-            self.runLoopSource = nil
-        }
-        if let eventTap {
-            CFMachPortInvalidate(eventTap)
-            self.eventTap = nil
-        }
-    }
-
-    func cleanup() {
-        teardownMonitors()
-    }
-}
-
-private extension NSEvent.ModifierFlags {
-    init(_ values: [NSEvent.ModifierFlags]) {
-        self = []
-        for value in values {
-            insert(value)
+            otherKeyPressed = false
         }
     }
 }
