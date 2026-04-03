@@ -15,6 +15,13 @@ struct YapApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("Yap", id: "main") {
+            ContentView()
+                .environmentObject(appState)
+                .frame(minWidth: 380, minHeight: 500)
+        }
+        .defaultSize(width: 400, height: 550)
+
         Settings {
             SettingsView()
         }
@@ -28,9 +35,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         PipelineController.shared.setup()
     }
 
-    /// Click dock icon → open Settings directly
+    /// Click dock icon → open main window
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if !flag {
+            // No visible windows → open main window
+            for window in NSApp.windows {
+                if window.title == "Yap" || window.identifier?.rawValue.contains("main") == true {
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    return true
+                }
+            }
+            // Fallback: open settings
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
         return true
     }
 
