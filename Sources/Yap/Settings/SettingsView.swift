@@ -4,16 +4,17 @@ import ApplicationServices
 
 struct SettingsView: View {
     @AppStorage("openaiApiKey") private var apiKey = ""
+    @AppStorage("transcriptionMode") private var modeRaw = TranscriptionMode.normal.rawValue
     @State private var micPermission = false
     @State private var axPermission = false
     @State private var inputMonitoring = false
 
     var body: some View {
         TabView {
-            generalTab
-                .tabItem { Label("General", systemImage: "gear") }
+            generalTab.tabItem { Label("General", systemImage: "gear") }
+            usageTab.tabItem { Label("Usage", systemImage: "chart.bar") }
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 480, height: 380)
         .onAppear { refreshPermissions() }
     }
 
@@ -25,8 +26,18 @@ struct SettingsView: View {
                 SecureField("sk-...", text: $apiKey)
                     .textFieldStyle(.roundedBorder)
                 Text("Uses gpt-4o-transcribe — best for Vietnamese + English")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Transcription Mode") {
+                Picker("Mode", selection: $modeRaw) {
+                    ForEach(TranscriptionMode.allCases) { mode in
+                        Label(mode.rawValue, systemImage: mode.icon).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(currentMode.description)
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Hotkey") {
@@ -34,13 +45,11 @@ struct SettingsView: View {
                     Text("Push-to-talk")
                     Spacer()
                     Text("⌘ Command")
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 }
                 Text("Hold to record, release to transcribe")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Permissions") {
@@ -65,7 +74,50 @@ struct SettingsView: View {
         .padding()
     }
 
+    // MARK: - Usage Tab
+
+    private var usageTab: some View {
+        Form {
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(UsageTracker.currentMonthCount)")
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                        Text("transcriptions this month")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.blue)
+                }
+            }
+
+            Section("History") {
+                let stats = UsageTracker.stats
+                if stats.isEmpty {
+                    Text("No usage data yet").foregroundStyle(.secondary)
+                } else {
+                    ForEach(stats, id: \.month) { item in
+                        HStack {
+                            Text(item.month).font(.system(.body, design: .monospaced))
+                            Spacer()
+                            Text("\(item.count) transcriptions")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
     // MARK: - Helpers
+
+    private var currentMode: TranscriptionMode {
+        TranscriptionMode(rawValue: modeRaw) ?? .normal
+    }
 
     private func permissionRow(_ title: String, granted: Bool, action: @escaping () -> Void) -> some View {
         HStack {
@@ -74,9 +126,7 @@ struct SettingsView: View {
             Text(title)
             Spacer()
             if !granted {
-                Button("Grant") { action() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                Button("Grant") { action() }.buttonStyle(.bordered).controlSize(.small)
             } else {
                 Text("Granted").foregroundStyle(.secondary).font(.caption)
             }

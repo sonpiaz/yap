@@ -11,13 +11,21 @@ enum STTProvider {
             throw STTError.noApiKey
         }
 
+        let mode = TranscriptionMode.current
         let wavData = try createWAV(samples: samples, sampleRate: 16000)
-        return try await callOpenAI(apiKey: apiKey, wavData: wavData)
+        var text = try await callOpenAI(apiKey: apiKey, wavData: wavData, prompt: mode.sttPrompt)
+
+        // Post-process with GPT-4o if mode requires rewrite
+        if mode.needsRewrite, !text.isEmpty {
+            text = try await rewriteWithGPT(apiKey: apiKey, text: text, systemPrompt: mode.rewritePrompt)
+        }
+
+        return text
     }
 
     // MARK: - OpenAI API
 
-    private static func callOpenAI(apiKey: String, wavData: Data) async throws -> String {
+    private static func callOpenAI(apiKey: String, wavData: Data, prompt: String) async throws -> String {
         let boundary = UUID().uuidString
         let model = "gpt-4o-transcribe"
         let url = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
@@ -42,10 +50,10 @@ enum STTProvider {
         body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n")
         body.append("\(model)\r\n")
 
-        // prompt — helps with Vietnamese + English mixed speech
+        // prompt
         body.append("--\(boundary)\r\n")
         body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
-        body.append("This audio may contain Vietnamese and English mixed speech. Transcribe accurately.\r\n")
+        body.append("\(prompt)\r\n")
 
         body.append("--\(boundary)--\r\n")
         request.httpBody = body
@@ -66,6 +74,43 @@ enum STTProvider {
         }
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - GPT-4o Rewrite
+
+    private static func rewriteWithGPT(apiKey: String, text: String, systemPrompt: String) async throws -> String {
+        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "model": "gpt-4o-mini",
+            "temperature": 0.3,
+            "max_tokens": 1024,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": text]
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            NSLog("[Yap] Rewrite failed, using raw transcription")
+            return text // fallback to raw transcription
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            return text
+        }
+
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - WAV Encoder

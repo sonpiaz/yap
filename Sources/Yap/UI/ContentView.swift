@@ -74,6 +74,9 @@ struct ContentView: View {
                 Text("Hold ⌘ to record").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Text("\(UsageTracker.currentMonthCount)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.tertiary)
             SettingsLink {
                 Image(systemName: "gear").font(.caption).foregroundStyle(.secondary)
             }

@@ -105,6 +105,7 @@ final class PipelineController {
                 state.isTranscribing = false
                 state.addTranscription(text)
                 TextInserter.insert(text)
+                UsageTracker.recordTranscription()
             } catch {
                 state.isTranscribing = false
                 state.error = error.localizedDescription

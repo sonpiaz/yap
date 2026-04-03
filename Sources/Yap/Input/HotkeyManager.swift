@@ -3,9 +3,10 @@ import CoreGraphics
 
 /// Listens for a global modifier key (default: Command) via CGEventTap.
 ///
-/// IMPORTANT: This class is NOT @MainActor. The CGEventTap callback fires on
-/// the main run loop but from a C function — we extract raw values there and
-/// dispatch to main queue for state changes.
+/// To avoid conflict with Cmd+C/V/Z shortcuts, we use a delayed-activation
+/// strategy: when Command is pressed alone, we wait a short grace period.
+/// If any other key is pressed during that window, we cancel.
+/// If Command is still held after the grace period with no other keys → activate.
 final class HotkeyManager {
     static let shared = HotkeyManager()
 
@@ -15,41 +16,49 @@ final class HotkeyManager {
     /// The modifier flag to listen for. Default = Command.
     var targetModifier: CGEventFlags = .maskCommand
 
+    /// Grace period to distinguish solo-Command from Cmd+C etc.
+    private let activationDelay: TimeInterval = 0.20
+
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var tapCheckTimer: Timer?
-    private var isKeyDown = false
-    private var lastFlags: UInt64 = 0
+
+    private var isModifierDown = false   // physical state: modifier is held
+    private var isActivated = false      // logical state: recording triggered
+    private var activationWorkItem: DispatchWorkItem?
+    private var otherKeyPressed = false  // true if a non-modifier key was pressed during hold
 
     private init() {}
 
     // MARK: - Setup / Teardown
 
     func start() {
-        stop() // clean any existing tap
+        stop()
 
         guard CGPreflightListenEventAccess() else {
             NSLog("[Yap] Input Monitoring permission not granted")
             return
         }
 
-        let mask: CGEventMask = 1 << CGEventType.flagsChanged.rawValue
+        let mask: CGEventMask =
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.keyDown.rawValue)
 
-        // C callback — no captures, no Swift closures
         let callback: CGEventTapCallBack = { proxy, type, event, refcon in
             guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
             let mgr = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
 
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 NSLog("[Yap] CGEventTap was disabled, re-enabling")
-                if let tap = mgr.eventTap {
-                    CGEvent.tapEnable(tap: tap, enable: true)
-                }
+                if let tap = mgr.eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
                 return Unmanaged.passUnretained(event)
             }
 
-            let rawFlags = event.flags.rawValue
-            mgr.handleFlagsChanged(rawFlags)
+            if type == .keyDown {
+                mgr.handleKeyDown()
+            } else if type == .flagsChanged {
+                mgr.handleFlagsChanged(event.flags.rawValue)
+            }
             return Unmanaged.passUnretained(event)
         }
 
@@ -72,9 +81,9 @@ final class HotkeyManager {
             CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
-        NSLog("[Yap] CGEventTap started (listening for modifier 0x%llx)", targetModifier.rawValue)
+        NSLog("[Yap] CGEventTap started (modifier 0x%llx, delay %.0fms)", targetModifier.rawValue, activationDelay * 1000)
 
-        // Periodic check: re-enable tap if macOS disabled it (Wispr Flow bug)
+        // Re-enable tap if macOS disables it
         DispatchQueue.main.async {
             self.tapCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
                 guard let self, let tap = self.eventTap else { return }
@@ -89,6 +98,8 @@ final class HotkeyManager {
     func stop() {
         tapCheckTimer?.invalidate()
         tapCheckTimer = nil
+        activationWorkItem?.cancel()
+        activationWorkItem = nil
         if let src = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
             runLoopSource = nil
@@ -97,38 +108,63 @@ final class HotkeyManager {
             CFMachPortInvalidate(tap)
             eventTap = nil
         }
-        isKeyDown = false
-        lastFlags = 0
+        isModifierDown = false
+        isActivated = false
     }
 
-    // MARK: - Flag Handling
+    // MARK: - Event Handling
 
-    /// Called from the CGEventTap callback (on the main run loop thread).
-    /// Extracts whether the target modifier is pressed/released.
+    /// A non-modifier key was pressed (C, V, Z, etc.) while modifier is held → it's a shortcut.
+    private func handleKeyDown() {
+        if isModifierDown && !isActivated {
+            // Cancel the pending activation — this is Cmd+C, Cmd+V, etc.
+            otherKeyPressed = true
+            activationWorkItem?.cancel()
+            activationWorkItem = nil
+        }
+    }
+
     private func handleFlagsChanged(_ rawFlags: UInt64) {
         let targetRaw = targetModifier.rawValue
-        let wasDown = (lastFlags & targetRaw) != 0
         let isDown = (rawFlags & targetRaw) != 0
-        lastFlags = rawFlags
 
-        if isDown && !wasDown && !isKeyDown {
-            // Only fire if ONLY our target modifier is pressed (no other modifiers)
-            let otherModifiers: UInt64 = (
-                CGEventFlags.maskCommand.rawValue |
-                CGEventFlags.maskAlternate.rawValue |
-                CGEventFlags.maskControl.rawValue |
-                CGEventFlags.maskShift.rawValue
-            ) & ~targetRaw
-            let hasOtherModifiers = (rawFlags & otherModifiers) != 0
-            guard !hasOtherModifiers else { return }
+        // Check no other modifiers are pressed
+        let allModifiers: UInt64 =
+            CGEventFlags.maskCommand.rawValue |
+            CGEventFlags.maskAlternate.rawValue |
+            CGEventFlags.maskControl.rawValue |
+            CGEventFlags.maskShift.rawValue
+        let otherModifiers = (rawFlags & allModifiers) & ~targetRaw
+        let hasOtherModifiers = otherModifiers != 0
 
-            isKeyDown = true
-            NSLog("[Yap] Hotkey DOWN")
-            DispatchQueue.main.async { self.onKeyDown?() }
-        } else if !isDown && wasDown && isKeyDown {
-            isKeyDown = false
-            NSLog("[Yap] Hotkey UP")
-            DispatchQueue.main.async { self.onKeyUp?() }
+        if isDown && !isModifierDown && !hasOtherModifiers {
+            // Modifier pressed — start grace period
+            isModifierDown = true
+            otherKeyPressed = false
+            activationWorkItem?.cancel()
+
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.isModifierDown, !self.otherKeyPressed else { return }
+                // Grace period passed, no other key was pressed → activate!
+                self.isActivated = true
+                NSLog("[Yap] Hotkey ACTIVATED (solo hold confirmed)")
+                self.onKeyDown?()
+            }
+            activationWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay, execute: work)
+
+        } else if !isDown && isModifierDown {
+            // Modifier released
+            isModifierDown = false
+            activationWorkItem?.cancel()
+            activationWorkItem = nil
+
+            if isActivated {
+                isActivated = false
+                NSLog("[Yap] Hotkey RELEASED")
+                DispatchQueue.main.async { self.onKeyUp?() }
+            }
+            otherKeyPressed = false
         }
     }
 }
