@@ -89,6 +89,14 @@ final class PipelineController {
             return
         }
 
+        // Silence detection — skip if audio is too quiet (no speech)
+        let rms = sqrt(samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count))
+        NSLog("[Yap] Audio RMS: %.5f", rms)
+        guard rms > 0.005 else {
+            NSLog("[Yap] Too quiet, skipping transcription")
+            return
+        }
+
         SoundFeedback.shared.playStopTone()
 
         NSLog("[Yap] Transcribing %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
