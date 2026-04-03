@@ -93,15 +93,25 @@ final class PipelineController {
         // Play stop sound
         NSSound(named: "Pop")?.play()
 
-        // TODO Phase 4: transcribe
-        NSLog("[Yap] Ready to transcribe %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
+        NSLog("[Yap] Transcribing %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
         state.isTranscribing = true
 
-        // Placeholder: simulate transcription
         Task {
-            try? await Task.sleep(for: .seconds(0.5))
-            state.isTranscribing = false
-            state.addTranscription("[Placeholder] \(samples.count) samples recorded")
+            do {
+                let text = try await STTProvider.transcribe(samples)
+                guard !text.isEmpty else {
+                    state.isTranscribing = false
+                    return
+                }
+                NSLog("[Yap] Transcribed: %@", text)
+                state.isTranscribing = false
+                state.addTranscription(text)
+                TextInserter.insert(text)
+            } catch {
+                state.isTranscribing = false
+                state.error = error.localizedDescription
+                NSLog("[Yap] Transcription error: %@", error.localizedDescription)
+            }
         }
     }
 
