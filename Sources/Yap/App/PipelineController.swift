@@ -76,6 +76,7 @@ final class PipelineController {
         state.showOverlay = true
         state.recordingDuration = 0
         FloatingBarController.shared.show()
+        MediaController.pauseIfPlaying()
         state.error = nil
         recordingStartTime = Date()
 
@@ -104,6 +105,7 @@ final class PipelineController {
         state.isRecording = false
         state.showOverlay = false
         FloatingBarController.shared.hide()
+        MediaController.resumeIfPaused()
 
         // Too short — cancel
         if duration < minimumDuration {
@@ -162,6 +164,7 @@ final class PipelineController {
         state.isRecording = false
         state.showOverlay = false
         FloatingBarController.shared.hide()
+        MediaController.resumeIfPaused()
         durationTimer?.invalidate()
         durationTimer = nil
     }

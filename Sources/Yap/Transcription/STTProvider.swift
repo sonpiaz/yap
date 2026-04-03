@@ -13,7 +13,8 @@ enum STTProvider {
 
         let mode = TranscriptionMode.current
         let wavData = try createWAV(samples: samples, sampleRate: 16000)
-        var text = try await callOpenAI(apiKey: apiKey, wavData: wavData, prompt: mode.sttPrompt)
+        let prompt = CustomDictionary.promptFragment + mode.sttPrompt
+        var text = try await callOpenAI(apiKey: apiKey, wavData: wavData, prompt: prompt)
 
         // Post-process with GPT-4o if mode requires rewrite
         if mode.needsRewrite, !text.isEmpty {

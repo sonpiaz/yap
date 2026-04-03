@@ -6,80 +6,149 @@ struct SettingsView: View {
     @AppStorage("openaiApiKey") private var apiKey = ""
     @AppStorage("transcriptionMode") private var modeRaw = TranscriptionMode.normal.rawValue
     @AppStorage("soundEnabled") private var soundEnabled = true
+    @AppStorage("muteMusic") private var muteMusic = false
+    @AppStorage("hotkeyChoice") private var hotkeyChoice = "command"
     @State private var micPermission = false
     @State private var axPermission = false
     @State private var inputMonitoring = false
+    @State private var newWord = ""
 
     var body: some View {
-        generalTab
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear { refreshPermissions() }
+        Form {
+            apiSection
+            modeSection
+            hotkeySection
+            dictionarySection
+            systemSection
+            permissionSection
+        }
+        .formStyle(.grouped)
+        .onAppear { refreshPermissions() }
     }
 
-    // MARK: - General Tab
+    // MARK: - Sections
 
-    private var generalTab: some View {
-        Form {
-            Section("OpenAI API Key") {
-                SecureField("sk-...", text: $apiKey)
+    private var apiSection: some View {
+        Section("OpenAI API Key") {
+            SecureField("sk-...", text: $apiKey)
+                .textFieldStyle(.roundedBorder)
+            Text("Uses gpt-4o-transcribe — best for Vietnamese + English")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var modeSection: some View {
+        Section("Transcription Mode") {
+            Picker("Mode", selection: $modeRaw) {
+                ForEach(TranscriptionMode.allCases) { mode in
+                    Label(mode.rawValue, systemImage: mode.icon).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(currentMode.description)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var hotkeySection: some View {
+        Section("Hotkey") {
+            Picker("Push-to-talk key", selection: $hotkeyChoice) {
+                Text("⌘ Command").tag("command")
+                Text("⌥ Option").tag("option")
+                Text("⌃ Control").tag("control")
+                Text("fn Globe").tag("fn")
+            }
+            .onChange(of: hotkeyChoice) { _, newValue in
+                applyHotkey(newValue)
+            }
+            Text("Hold to record, release to transcribe")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var dictionarySection: some View {
+        Section("Custom Dictionary") {
+            HStack {
+                TextField("Add word (name, term...)", text: $newWord)
                     .textFieldStyle(.roundedBorder)
-                Text("Uses gpt-4o-transcribe — best for Vietnamese + English")
+                    .onSubmit { addWord() }
+                Button("Add") { addWord() }
+                    .disabled(newWord.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            let words = CustomDictionary.words
+            if words.isEmpty {
+                Text("Add names or terms the model gets wrong")
                     .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section("Transcription Mode") {
-                Picker("Mode", selection: $modeRaw) {
-                    ForEach(TranscriptionMode.allCases) { mode in
-                        Label(mode.rawValue, systemImage: mode.icon).tag(mode.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text(currentMode.description)
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section("Hotkey") {
-                HStack {
-                    Text("Push-to-talk")
-                    Spacer()
-                    Text("⌘ Command")
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                }
-                Text("Hold to record, release to transcribe")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section("System") {
-                Toggle("Sound feedback", isOn: $soundEnabled)
-            }
-
-            Section("Permissions") {
-                permissionRow("Microphone", granted: micPermission) {
-                    AVCaptureDevice.requestAccess(for: .audio) { _ in
-                        DispatchQueue.main.async { refreshPermissions() }
-                    }
-                }
-                permissionRow("Accessibility", granted: axPermission) {
-                    let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-                    _ = AXIsProcessTrustedWithOptions(opts as CFDictionary)
-                    refreshPermissions()
-                }
-                permissionRow("Input Monitoring", granted: inputMonitoring) {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-                        NSWorkspace.shared.open(url)
+            } else {
+                FlowLayout(spacing: 6) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { i, word in
+                        HStack(spacing: 4) {
+                            Text(word).font(.caption)
+                            Button {
+                                CustomDictionary.remove(at: i)
+                            } label: {
+                                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: Capsule())
                     }
                 }
             }
         }
-        .formStyle(.grouped)
-        .padding()
+    }
+
+    private var systemSection: some View {
+        Section("System") {
+            Toggle("Sound feedback", isOn: $soundEnabled)
+            Toggle("Mute music while dictating", isOn: $muteMusic)
+        }
+    }
+
+    private var permissionSection: some View {
+        Section("Permissions") {
+            permissionRow("Microphone", granted: micPermission) {
+                AVCaptureDevice.requestAccess(for: .audio) { _ in
+                    DispatchQueue.main.async { refreshPermissions() }
+                }
+            }
+            permissionRow("Accessibility", granted: axPermission) {
+                let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                _ = AXIsProcessTrustedWithOptions(opts as CFDictionary)
+                refreshPermissions()
+            }
+            permissionRow("Input Monitoring", granted: inputMonitoring) {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
     }
 
     // MARK: - Helpers
 
     private var currentMode: TranscriptionMode {
         TranscriptionMode(rawValue: modeRaw) ?? .normal
+    }
+
+    private func addWord() {
+        CustomDictionary.add(newWord)
+        newWord = ""
+    }
+
+    private func applyHotkey(_ choice: String) {
+        let mgr = HotkeyManager.shared
+        switch choice {
+        case "option": mgr.targetModifier = .maskAlternate
+        case "control": mgr.targetModifier = .maskControl
+        case "fn": mgr.targetModifier = .maskSecondaryFn
+        default: mgr.targetModifier = .maskCommand
+        }
+        mgr.start()
+        NSLog("[Yap] Hotkey changed to: %@", choice)
     }
 
     private func permissionRow(_ title: String, granted: Bool, action: @escaping () -> Void) -> some View {
@@ -100,5 +169,45 @@ struct SettingsView: View {
         micPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         axPermission = AXIsProcessTrusted()
         inputMonitoring = CGPreflightListenEventAccess()
+    }
+}
+
+// MARK: - Flow Layout (tag cloud for dictionary words)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = layout(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = layout(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+
+        return (CGSize(width: maxWidth, height: y + rowHeight), positions)
     }
 }

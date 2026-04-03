@@ -28,6 +28,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: ["soundEnabled": true])
         NSLog("[Yap] App launched")
         NSApplication.shared.setActivationPolicy(.regular)
+
+        // Apply saved hotkey
+        let choice = UserDefaults.standard.string(forKey: "hotkeyChoice") ?? "command"
+        switch choice {
+        case "option": HotkeyManager.shared.targetModifier = .maskAlternate
+        case "control": HotkeyManager.shared.targetModifier = .maskControl
+        case "fn": HotkeyManager.shared.targetModifier = .maskSecondaryFn
+        default: HotkeyManager.shared.targetModifier = .maskCommand
+        }
+
         PipelineController.shared.setup()
     }
 
