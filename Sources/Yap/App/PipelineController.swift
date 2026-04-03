@@ -53,8 +53,7 @@ final class PipelineController {
         state.error = nil
         recordingStartTime = Date()
 
-        // Play start sound
-        NSSound(named: "Tink")?.play()
+        SoundFeedback.shared.playStartTone()
 
         // Duration timer
         durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -90,8 +89,7 @@ final class PipelineController {
             return
         }
 
-        // Play stop sound
-        NSSound(named: "Pop")?.play()
+        SoundFeedback.shared.playStopTone()
 
         NSLog("[Yap] Transcribing %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
         state.isTranscribing = true
