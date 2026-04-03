@@ -21,10 +21,13 @@ struct ContentView: View {
     // MARK: - Stats Header
 
     private var statsHeader: some View {
-        HStack(spacing: 20) {
-            statBadge(icon: "🚀", value: "\(UsageTracker.currentMonthCount)", label: "this month")
-            statBadge(icon: "📝", value: formatWords(state.totalWords), label: "words")
+        HStack(spacing: 16) {
+            statBadge(icon: "⭐", value: "\(UsageTracker.streakDays)", label: "day streak")
+            statBadge(icon: "🚀", value: formatWords(UsageTracker.totalWords), label: "words")
+            statBadge(icon: "🏆", value: "\(UsageTracker.wordsPerMinute)", label: "WPM")
             Spacer()
+            Text("\(UsageTracker.currentMonthCount) this month")
+                .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

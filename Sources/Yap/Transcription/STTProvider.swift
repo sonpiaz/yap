@@ -11,7 +11,7 @@ enum STTProvider {
             throw STTError.noApiKey
         }
 
-        let mode = TranscriptionMode.current
+        let mode = TranscriptionMode.current.resolved
         let wavData = try createWAV(samples: samples, sampleRate: 16000)
         let prompt = CustomDictionary.promptFragment + mode.sttPrompt
         var text = try await callOpenAI(apiKey: apiKey, wavData: wavData, prompt: prompt)

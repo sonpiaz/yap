@@ -1,6 +1,7 @@
 import Foundation
 
 enum TranscriptionMode: String, CaseIterable, Identifiable {
+    case auto = "Auto"
     case normal = "Normal"
     case clean = "Clean"
     case email = "Email / Formal"
@@ -9,6 +10,7 @@ enum TranscriptionMode: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .auto: return "wand.and.stars"
         case .normal: return "waveform"
         case .clean: return "sparkles"
         case .email: return "envelope"
@@ -17,6 +19,7 @@ enum TranscriptionMode: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
+        case .auto: return "Auto-detect: Email app → formal, Chat → clean, else normal"
         case .normal: return "Transcribe exactly what you say"
         case .clean: return "Remove filler words (um, uh, à...)"
         case .email: return "Rewrite as professional text"
@@ -24,8 +27,15 @@ enum TranscriptionMode: String, CaseIterable, Identifiable {
     }
 
     /// Prompt for gpt-4o-transcribe (affects raw transcription)
+    /// Resolve Auto mode to a concrete mode
+    var resolved: TranscriptionMode {
+        if self == .auto { return AppStyleDetector.detectMode() }
+        return self
+    }
+
     var sttPrompt: String {
         switch self {
+        case .auto: return resolved.sttPrompt
         case .normal:
             return "Transcribe this audio accurately. It may contain Vietnamese and English."
         case .clean:
@@ -37,7 +47,7 @@ enum TranscriptionMode: String, CaseIterable, Identifiable {
 
     /// If true, post-process with GPT-4o to rewrite the text.
     var needsRewrite: Bool {
-        self == .email
+        (self == .auto ? resolved : self) == .email
     }
 
     /// System prompt for GPT-4o rewrite (only used for .email mode)

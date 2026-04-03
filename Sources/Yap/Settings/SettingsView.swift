@@ -7,11 +7,14 @@ struct SettingsView: View {
     @AppStorage("transcriptionMode") private var modeRaw = TranscriptionMode.normal.rawValue
     @AppStorage("soundEnabled") private var soundEnabled = true
     @AppStorage("muteMusic") private var muteMusic = false
+    @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("hotkeyChoice") private var hotkeyChoice = "command"
     @State private var micPermission = false
     @State private var axPermission = false
     @State private var inputMonitoring = false
     @State private var newWord = ""
+    @State private var snippetTrigger = ""
+    @State private var snippetExpansion = ""
 
     var body: some View {
         Form {
@@ -19,6 +22,7 @@ struct SettingsView: View {
             modeSection
             hotkeySection
             dictionarySection
+            snippetSection
             systemSection
             permissionSection
         }
@@ -101,8 +105,50 @@ struct SettingsView: View {
         }
     }
 
+    private var snippetSection: some View {
+        Section("Snippets") {
+            HStack {
+                TextField("Trigger", text: $snippetTrigger)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
+                Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                TextField("Expansion text", text: $snippetExpansion)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add") {
+                    guard !snippetTrigger.isEmpty, !snippetExpansion.isEmpty else { return }
+                    SnippetManager.add(Snippet(trigger: snippetTrigger, expansion: snippetExpansion))
+                    snippetTrigger = ""
+                    snippetExpansion = ""
+                }
+            }
+
+            let snips = SnippetManager.snippets
+            if snips.isEmpty {
+                Text("Say a trigger word → expands to full text")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(snips) { snippet in
+                    HStack {
+                        Text(snippet.trigger).fontWeight(.medium)
+                        Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                        Text(snippet.expansion).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        Button { SnippetManager.remove(id: snippet.id) } label: {
+                            Image(systemName: "trash").font(.caption).foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
     private var systemSection: some View {
         Section("System") {
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, newValue in
+                    LaunchAtLogin.set(enabled: newValue)
+                }
             Toggle("Sound feedback", isOn: $soundEnabled)
             Toggle("Mute music while dictating", isOn: $muteMusic)
         }

@@ -141,11 +141,15 @@ final class PipelineController {
                     state.isTranscribing = false
                     return
                 }
-                NSLog("[Yap] Transcribed: %@", text)
+                // Apply snippets
+                let finalText = SnippetManager.applySnippets(to: text)
+                NSLog("[Yap] Transcribed: %@", finalText)
                 state.isTranscribing = false
-                state.addTranscription(text)
-                TextInserter.insert(text)
-                UsageTracker.recordTranscription()
+                state.addTranscription(finalText)
+                TextInserter.insert(finalText)
+                let wordCount = text.split(separator: " ").count
+                let duration = Double(samples.count) / 16000.0
+                UsageTracker.recordTranscription(wordCount: wordCount, durationSeconds: duration)
             } catch {
                 state.isTranscribing = false
                 state.error = error.localizedDescription
