@@ -10,6 +10,8 @@ final class AudioRecorder {
     private var buffer: [Float] = []
     private let lock = NSLock()
 
+    var isRunning: Bool { engine != nil }
+
     /// Current RMS audio level (0…1), updated from the tap callback.
     @Published var audioLevel: Float = 0
 

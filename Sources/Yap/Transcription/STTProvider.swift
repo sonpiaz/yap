@@ -55,6 +55,11 @@ enum STTProvider {
         body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
         body.append("\(prompt)\r\n")
 
+        // language hint — Vietnamese primary (handles English mixed in)
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
+        body.append("vi\r\n")
+
         body.append("--\(boundary)--\r\n")
         request.httpBody = body
 
@@ -116,23 +121,24 @@ enum STTProvider {
     // MARK: - WAV Encoder
 
     private static func createWAV(samples: [Float], sampleRate: Int) throws -> Data {
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
+        // Convert Float32 → Int16 PCM (more reliable for OpenAI API)
+        let int16Format = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
             sampleRate: Double(sampleRate),
             channels: 1,
-            interleaved: false
+            interleaved: true
         )!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))!
+        let buffer = AVAudioPCMBuffer(pcmFormat: int16Format, frameCapacity: AVAudioFrameCount(samples.count))!
         buffer.frameLength = AVAudioFrameCount(samples.count)
 
-        let channelData = buffer.floatChannelData![0]
+        let int16Data = buffer.int16ChannelData![0]
         for i in 0..<samples.count {
-            channelData[i] = samples[i]
+            int16Data[i] = Int16(max(-1, min(1, samples[i])) * Float(Int16.max))
         }
 
         let tmpURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("yap_\(UUID().uuidString).wav")
-        let file = try AVAudioFile(forWriting: tmpURL, settings: format.settings)
+        let file = try AVAudioFile(forWriting: tmpURL, settings: int16Format.settings)
         try file.write(from: buffer)
         let data = try Data(contentsOf: tmpURL)
         try? FileManager.default.removeItem(at: tmpURL)

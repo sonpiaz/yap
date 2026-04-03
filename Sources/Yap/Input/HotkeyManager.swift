@@ -10,8 +10,10 @@ import CoreGraphics
 final class HotkeyManager {
     static let shared = HotkeyManager()
 
-    var onKeyDown: (() -> Void)?
+    var onModifierDown: (() -> Void)?  // fires immediately when modifier pressed
+    var onKeyDown: (() -> Void)?        // fires after grace period (confirmed solo hold)
     var onKeyUp: (() -> Void)?
+    var onCancelled: (() -> Void)?      // fires if Cmd+C/V detected (abort)
 
     /// The modifier flag to listen for. Default = Command.
     var targetModifier: CGEventFlags = .maskCommand
@@ -121,6 +123,7 @@ final class HotkeyManager {
             otherKeyPressed = true
             activationWorkItem?.cancel()
             activationWorkItem = nil
+            DispatchQueue.main.async { self.onCancelled?() }
         }
     }
 
@@ -142,6 +145,9 @@ final class HotkeyManager {
             isModifierDown = true
             otherKeyPressed = false
             activationWorkItem?.cancel()
+
+            // Start mic buffering immediately
+            DispatchQueue.main.async { self.onModifierDown?() }
 
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.isModifierDown, !self.otherKeyPressed else { return }

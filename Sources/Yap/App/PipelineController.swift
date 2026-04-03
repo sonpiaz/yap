@@ -25,11 +25,20 @@ final class PipelineController {
 
     func setup() {
         let hotkey = HotkeyManager.shared
+        hotkey.onModifierDown = { [weak self] in
+            // Start buffering audio immediately (before 200ms grace period)
+            Task { @MainActor in self?.preRecording() }
+        }
         hotkey.onKeyDown = { [weak self] in
-            Task { @MainActor in self?.startRecording() }
+            // Grace period passed — confirm recording
+            Task { @MainActor in self?.confirmRecording() }
         }
         hotkey.onKeyUp = { [weak self] in
             Task { @MainActor in self?.stopRecording() }
+        }
+        hotkey.onCancelled = { [weak self] in
+            // Cmd+C/V detected — cancel pre-recording
+            Task { @MainActor in self?.cancelRecording() }
         }
         hotkey.start()
         NSLog("[Yap] Pipeline ready")
@@ -37,14 +46,30 @@ final class PipelineController {
 
     // MARK: - Recording
 
-    func startRecording() {
-        guard !state.isRecording else { return }
+    /// Step 1: Command pressed — start mic immediately (captures audio from the very start)
+    private var isPreRecording = false
 
+    func preRecording() {
+        guard !state.isRecording, !isPreRecording else { return }
         do {
             try recorder.startRecording()
+            isPreRecording = true
         } catch {
             state.error = "Mic error: \(error.localizedDescription)"
-            return
+        }
+    }
+
+    /// Step 2: 200ms passed, no other key — confirm this is a solo hold
+    func confirmRecording() {
+        guard isPreRecording || !state.isRecording else { return }
+        isPreRecording = false
+
+        // If preRecording didn't start (no mic), try now
+        if recorder.isRunning == false {
+            do { try recorder.startRecording() } catch {
+                state.error = "Mic error: \(error.localizedDescription)"
+                return
+            }
         }
 
         state.isRecording = true
@@ -55,7 +80,6 @@ final class PipelineController {
 
         SoundFeedback.shared.playStartTone()
 
-        // Duration timer
         durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -123,6 +147,10 @@ final class PipelineController {
     }
 
     func cancelRecording() {
+        if isPreRecording {
+            _ = recorder.stopRecording()
+            isPreRecording = false
+        }
         guard state.isRecording else { return }
         _ = recorder.stopRecording()
         state.isRecording = false
