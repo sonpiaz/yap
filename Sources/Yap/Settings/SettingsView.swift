@@ -10,12 +10,9 @@ struct SettingsView: View {
     @State private var inputMonitoring = false
 
     var body: some View {
-        TabView {
-            generalTab.tabItem { Label("General", systemImage: "gear") }
-            usageTab.tabItem { Label("Usage", systemImage: "chart.bar") }
-        }
-        .frame(width: 480, height: 380)
-        .onAppear { refreshPermissions() }
+        generalTab
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { refreshPermissions() }
     }
 
     // MARK: - General Tab
@@ -66,45 +63,6 @@ struct SettingsView: View {
                 permissionRow("Input Monitoring", granted: inputMonitoring) {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
                         NSWorkspace.shared.open(url)
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    // MARK: - Usage Tab
-
-    private var usageTab: some View {
-        Form {
-            Section {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("\(UsageTracker.currentMonthCount)")
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                        Text("transcriptions this month")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.blue)
-                }
-            }
-
-            Section("History") {
-                let stats = UsageTracker.stats
-                if stats.isEmpty {
-                    Text("No usage data yet").foregroundStyle(.secondary)
-                } else {
-                    ForEach(stats, id: \.month) { item in
-                        HStack {
-                            Text(item.month).font(.system(.body, design: .monospaced))
-                            Spacer()
-                            Text("\(item.count) transcriptions")
-                                .foregroundStyle(.secondary)
-                        }
                     }
                 }
             }

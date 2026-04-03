@@ -4,32 +4,25 @@ struct ContentView: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                // Transcription list
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
-                            if state.transcriptions.isEmpty {
-                                emptyState
-                            }
-                            ForEach(state.transcriptions) { entry in
-                                TranscriptionRow(entry: entry)
-                                    .id(entry.id)
-                            }
+        VStack(spacing: 0) {
+            // Transcription list
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if state.transcriptions.isEmpty {
+                            emptyState
                         }
-                        .padding()
+                        ForEach(state.transcriptions) { entry in
+                            TranscriptionRow(entry: entry)
+                                .id(entry.id)
+                        }
                     }
+                    .padding()
                 }
-
-                Divider()
-                statusBar
             }
 
-            // Recording overlay
-            if state.showOverlay {
-                recordingOverlay
-            }
+            Divider()
+            statusBar
         }
     }
 
@@ -101,54 +94,12 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.1), value: state.audioLevel)
     }
 
-    // MARK: - Recording Overlay
-
-    private var recordingOverlay: some View {
-        ZStack {
-            Rectangle().fill(.black.opacity(0.28)).ignoresSafeArea()
-            VStack(spacing: 14) {
-                ZStack {
-                    Circle().fill(.ultraThinMaterial).frame(width: 78, height: 78)
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 34))
-                        .foregroundStyle(.red)
-                }
-                Text("Listening…")
-                    .font(.headline).fontWeight(.semibold)
-
-                HStack(spacing: 3) {
-                    ForEach(0..<12, id: \.self) { i in
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(.white.opacity(0.9))
-                            .frame(width: 4, height: overlayBarHeight(i))
-                    }
-                }
-                .frame(height: 28)
-                .animation(.easeInOut(duration: 0.08), value: state.audioLevel)
-
-                Text("Release ⌘ to stop")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
-            .shadow(radius: 18)
-        }
-        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-    }
-
     // MARK: - Helpers
 
     private func barHeight(_ i: Int) -> CGFloat {
         let level = CGFloat(state.audioLevel)
         let variation = sin(Double(i) * 0.9) * 0.3 + 0.7
         return max(3, level * 16 * variation)
-    }
-
-    private func overlayBarHeight(_ i: Int) -> CGFloat {
-        let level = CGFloat(max(state.audioLevel, 0.05))
-        let variation = sin(Double(i) * 0.75) * 0.28 + 0.72
-        return max(6, level * 28 * variation)
     }
 
     private func formatDuration(_ d: TimeInterval) -> String {

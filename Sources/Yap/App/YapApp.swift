@@ -47,12 +47,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let contentView = ContentView()
+        let contentView = MainView()
             .environmentObject(AppState.shared)
-            .frame(minWidth: 380, minHeight: 500)
+            .frame(minWidth: 500, minHeight: 450)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 550),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 500),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
