@@ -41,7 +41,9 @@ final class PipelineController {
             Task { @MainActor in self?.cancelRecording() }
         }
         hotkey.start()
-        NSLog("[Yap] Pipeline ready")
+        NSLog("[Yap] Pipeline ready. AX=%d InputMon=%d",
+              AXIsProcessTrusted() ? 1 : 0,
+              CGPreflightListenEventAccess() ? 1 : 0)
     }
 
     // MARK: - Recording
