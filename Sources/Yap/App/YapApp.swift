@@ -23,6 +23,7 @@ struct YapApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["soundEnabled": true])
@@ -39,6 +40,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         PipelineController.shared.setup()
+
+        // Show onboarding on first launch
+        if !UserDefaults.standard.bool(forKey: "onboardingCompleted") {
+            showOnboarding()
+        }
     }
 
     /// Click dock icon → open main window
@@ -49,6 +55,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private func showOnboarding() {
+        let view = OnboardingView {
+            // Dismiss onboarding → open main window
+            DispatchQueue.main.async { [weak self] in
+                self?.onboardingWindow?.close()
+                self?.onboardingWindow = nil
+                self?.showMainWindow()
+            }
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 480),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Welcome to Yap"
+        window.contentView = NSHostingView(rootView: view)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        onboardingWindow = window
     }
 
     private func showMainWindow() {

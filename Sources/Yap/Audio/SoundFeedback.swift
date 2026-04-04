@@ -1,7 +1,7 @@
 import AVFoundation
 
-/// Minimal, elegant audio feedback — inspired by Apple's design philosophy.
-/// Short sine-wave tones: gentle, non-intrusive, satisfying.
+/// Premium audio feedback using layered harmonics for a rich, polished feel.
+/// Inspired by Apple's spatial audio cues — warm, minimal, satisfying.
 final class SoundFeedback {
     static let shared = SoundFeedback()
 
@@ -9,27 +9,55 @@ final class SoundFeedback {
 
     private init() {}
 
-    /// Soft ascending tone — "I'm listening" (like a gentle inhale)
+    /// Warm ascending chime — "I'm listening"
     func playStartTone() {
-        playTone(frequency: 880, duration: 0.08, volume: 0.15, fadeIn: true)
+        // C5 + E5 + G5 major chord, gentle rise
+        let tones: [(frequency: Double, amplitude: Double)] = [
+            (523.25, 0.5),  // C5
+            (659.25, 0.35), // E5
+            (783.99, 0.25), // G5
+        ]
+        playChord(tones: tones, duration: 0.12, volume: 0.14, fadeIn: true, pitchBend: 1.02)
     }
 
-    /// Soft descending double-tap — "Got it" (like a gentle exhale)  
+    /// Satisfying descending confirmation — "Got it"
     func playStopTone() {
-        playTone(frequency: 660, duration: 0.06, volume: 0.12, fadeIn: false)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            self.playTone(frequency: 880, duration: 0.06, volume: 0.10, fadeIn: false)
+        // G5 → C5 two-note drop with harmonics
+        let tones: [(frequency: Double, amplitude: Double)] = [
+            (783.99, 0.4),  // G5
+            (523.25, 0.35), // C5
+            (392.00, 0.2),  // G4 (sub-harmonic warmth)
+        ]
+        playChord(tones: tones, duration: 0.10, volume: 0.11, fadeIn: false, pitchBend: 0.98)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            let resolve: [(frequency: Double, amplitude: Double)] = [
+                (523.25, 0.45), // C5
+                (659.25, 0.3),  // E5
+                (261.63, 0.15), // C4 (octave below for depth)
+            ]
+            self.playChord(tones: resolve, duration: 0.14, volume: 0.10, fadeIn: false, pitchBend: 1.0)
         }
     }
 
-    /// Single soft low tone — "Cancelled"
+    /// Soft low tone — "Cancelled"
     func playCancelTone() {
-        playTone(frequency: 440, duration: 0.06, volume: 0.08, fadeIn: false)
+        let tones: [(frequency: Double, amplitude: Double)] = [
+            (349.23, 0.5),  // F4
+            (293.66, 0.3),  // D4
+        ]
+        playChord(tones: tones, duration: 0.08, volume: 0.07, fadeIn: false, pitchBend: 0.96)
     }
 
-    // MARK: - Tone Generator
+    // MARK: - Chord Generator
 
-    private func playTone(frequency: Double, duration: Double, volume: Float, fadeIn: Bool) {
+    private func playChord(
+        tones: [(frequency: Double, amplitude: Double)],
+        duration: Double,
+        volume: Float,
+        fadeIn: Bool,
+        pitchBend: Double
+    ) {
         let sampleRate: Double = 44100
         let frameCount = Int(sampleRate * duration)
 
@@ -42,33 +70,49 @@ final class SoundFeedback {
         data.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian) { Array($0) })
         data.append(contentsOf: "WAVE".utf8)
         data.append(contentsOf: "fmt ".utf8)
-        data.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) })  // chunk size
-        data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })   // PCM
-        data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })   // mono
-        data.append(contentsOf: withUnsafeBytes(of: UInt32(44100).littleEndian) { Array($0) }) // sample rate
-        data.append(contentsOf: withUnsafeBytes(of: UInt32(88200).littleEndian) { Array($0) }) // byte rate
-        data.append(contentsOf: withUnsafeBytes(of: UInt16(2).littleEndian) { Array($0) })   // block align
-        data.append(contentsOf: withUnsafeBytes(of: UInt16(16).littleEndian) { Array($0) })  // bits per sample
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(44100).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(88200).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(2).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(16).littleEndian) { Array($0) })
         data.append(contentsOf: "data".utf8)
         data.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian) { Array($0) })
 
-        // Generate sine wave with fade envelope
+        // Generate layered sine waves with harmonics
         for i in 0..<frameCount {
             let t = Double(i) / sampleRate
             let progress = Double(i) / Double(frameCount)
 
-            // Smooth envelope: fade in + fade out
+            // Smooth envelope with cosine curves
             var envelope: Double
-            let fadeOutStart = 0.6
-            if fadeIn && progress < 0.3 {
-                envelope = progress / 0.3  // fade in
+            let fadeOutStart = 0.5
+            if fadeIn && progress < 0.25 {
+                envelope = 0.5 * (1.0 - cos(.pi * progress / 0.25))
             } else if progress > fadeOutStart {
-                envelope = (1.0 - progress) / (1.0 - fadeOutStart)  // fade out
+                let fadeProgress = (progress - fadeOutStart) / (1.0 - fadeOutStart)
+                envelope = 0.5 * (1.0 + cos(.pi * fadeProgress))
             } else {
                 envelope = 1.0
             }
 
-            let sample = sin(2.0 * .pi * frequency * t) * envelope
+            // Pitch bend over time
+            let bendFactor = 1.0 + (pitchBend - 1.0) * progress
+
+            // Sum all tones with their harmonics
+            var sample = 0.0
+            for tone in tones {
+                let freq = tone.frequency * bendFactor
+                // Fundamental
+                sample += sin(2.0 * .pi * freq * t) * tone.amplitude
+                // 2nd harmonic (octave, subtle)
+                sample += sin(2.0 * .pi * freq * 2.0 * t) * tone.amplitude * 0.08
+                // 3rd harmonic (warmth)
+                sample += sin(2.0 * .pi * freq * 3.0 * t) * tone.amplitude * 0.03
+            }
+
+            sample *= envelope
             let int16 = Int16(clamping: Int(sample * Double(Int16.max)))
             data.append(contentsOf: withUnsafeBytes(of: int16.littleEndian) { Array($0) })
         }

@@ -7,7 +7,7 @@ class FloatingBarController {
     static let shared = FloatingBarController()
 
     private var window: NSWindow?
-    private var hostingView: NSHostingView<FloatingBarView>?
+    private var hostingView: NSView?
 
     private init() {}
 
@@ -15,11 +15,12 @@ class FloatingBarController {
         guard window == nil else { return }
 
         let view = FloatingBarView()
+            .environmentObject(AppState.shared)
         let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 220, height: 44)
+        hosting.frame = NSRect(x: 0, y: 0, width: 250, height: 44)
 
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 250, height: 44),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -35,28 +36,47 @@ class FloatingBarController {
         // Position: top-center of main screen
         if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
-            let x = screenFrame.midX - 110
+            let x = screenFrame.midX - 125
             let y = screenFrame.maxY - 60
             win.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
+        win.animationBehavior = .none   // prevent _NSWindowTransformAnimation
         win.orderFront(nil)
         window = win
         hostingView = hosting
     }
 
     func hide() {
-        window?.close()
+        guard let win = window else { return }
+        // 1. Hide immediately without animation (orderOut, NOT close)
+        //    close() triggers _NSWindowTransformAnimation which can crash
+        //    when its dealloc releases dangling pointers to SwiftUI content.
+        win.orderOut(nil)
+
+        // 2. Detach SwiftUI hosting view on next run loop to avoid
+        //    tearing down views during in-flight state updates.
+        let hosting = hostingView
         window = nil
         hostingView = nil
+        DispatchQueue.main.async {
+            win.contentView = nil
+            _ = hosting  // prevent premature dealloc
+        }
     }
 }
 
 struct FloatingBarView: View {
-    @ObservedObject private var state = AppState.shared
+    @EnvironmentObject private var state: AppState
 
     var body: some View {
         HStack(spacing: 10) {
+            // App logo
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+
             // Pulsing red dot
             Circle()
                 .fill(.red)
