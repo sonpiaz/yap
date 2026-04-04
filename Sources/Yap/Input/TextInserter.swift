@@ -2,19 +2,34 @@ import AppKit
 import ApplicationServices
 
 /// Inserts transcribed text into the frontmost app.
-/// Strategy: try Accessibility API first, fallback to clipboard + Cmd+V.
+/// Strategy: restore focus → try AX insertion → fallback to clipboard + Cmd+V.
 enum TextInserter {
 
     /// The app that was focused when recording started.
     /// Set this before transcription so we can restore focus if needed.
     static var targetApp: NSRunningApplication?
 
-    static func insert(_ text: String) {
+    /// Async insert that properly waits for focus restoration without blocking main thread.
+    static func insert(_ text: String) async {
         // Restore focus to the app the user was dictating into
-        if let target = targetApp {
+        if let target = targetApp, target.bundleIdentifier != Bundle.main.bundleIdentifier {
             target.activate()
-            // Give the app time to regain focus
-            usleep(150_000) // 150ms
+
+            // Poll until target app is actually frontmost (non-blocking)
+            for _ in 0..<20 { // max ~400ms
+                try? await Task.sleep(nanoseconds: 20_000_000) // 20ms
+                if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier {
+                    // One more yield to let the target app's run loop process the activation
+                    try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                    break
+                }
+            }
+
+            let actual = NSWorkspace.shared.frontmostApplication
+            NSLog("[Yap] Focus restore: target=%@ actual=%@ match=%d",
+                  target.bundleIdentifier ?? "nil",
+                  actual?.bundleIdentifier ?? "nil",
+                  (target.processIdentifier == actual?.processIdentifier) ? 1 : 0)
         }
 
         // Try AX direct insertion (no clipboard pollution)
@@ -36,7 +51,7 @@ enum TextInserter {
 
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success else {
-            NSLog("[Yap] AX: no focused element found")
+            NSLog("[Yap] AX: no focused element in %@", app.bundleIdentifier ?? "unknown")
             return false
         }
 
@@ -86,8 +101,6 @@ enum TextInserter {
         pb.clearContents()
         pb.setString(text, forType: .string)
 
-        // Small delay to ensure clipboard is ready
-        usleep(50_000) // 50ms
         simulateCmdV()
 
         // Restore old clipboard after 500ms
@@ -104,10 +117,10 @@ enum TextInserter {
         // key 0x09 = "V"
         let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
         down?.flags = .maskCommand
-        down?.post(tap: .cgAnnotatedSessionEventTap)
+        down?.post(tap: .cghidEventTap)
 
         let up = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
         up?.flags = .maskCommand
-        up?.post(tap: .cgAnnotatedSessionEventTap)
+        up?.post(tap: .cghidEventTap)
     }
 }

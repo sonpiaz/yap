@@ -51,6 +51,10 @@ final class PipelineController {
 
     func preRecording() {
         guard !state.isRecording, !isPreRecording else { return }
+
+        // Capture target app NOW — before any Yap UI appears or steals focus
+        TextInserter.targetApp = NSWorkspace.shared.frontmostApplication
+
         do {
             try recorder.startRecording()
             isPreRecording = true
@@ -71,9 +75,6 @@ final class PipelineController {
                 return
             }
         }
-
-        // Remember which app the user is dictating into
-        TextInserter.targetApp = NSWorkspace.shared.frontmostApplication
 
         state.isRecording = true
         state.showOverlay = true
@@ -151,7 +152,7 @@ final class PipelineController {
                 NSLog("[Yap] Transcribed: %@", finalText)
                 state.isTranscribing = false
                 state.addTranscription(finalText)
-                TextInserter.insert(finalText)
+                await TextInserter.insert(finalText)
                 let wordCount = text.split(separator: " ").count
                 let duration = Double(samples.count) / 16000.0
                 UsageTracker.recordTranscription(wordCount: wordCount, durationSeconds: duration)
