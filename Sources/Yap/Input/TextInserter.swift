@@ -16,12 +16,16 @@ enum TextInserter {
               targetApp?.bundleIdentifier ?? "nil",
               text.count)
 
+        // Step 0: Wait for ALL modifier keys to be released (Wispr Flow approach)
+        // If we paste while Option/Cmd is still held, the target app may ignore it
+        await waitForModifierRelease()
+
         // Step 1: Restore focus to target app
         let focusOK = await restoreFocus()
         NSLog("[Yap] Focus restored: %d", focusOK ? 1 : 0)
 
         // Extra settle time — let target app fully process activation
-        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
 
         // Step 2: Try AX insertion first (clean, no clipboard)
         if axTrusted, tryAXInsertion(text) {
@@ -45,6 +49,33 @@ enum TextInserter {
                 ? "Auto-paste failed. Press ⌘V to paste."
                 : "Grant Accessibility in System Settings."
         )
+    }
+
+    // MARK: - Wait for Key Release
+
+    /// Wait until all modifier keys are released before inserting text.
+    /// Wispr Flow does this too ("curKeysDown is non-empty on paste").
+    /// Without this, paste can fail because the target app sees modifiers held.
+    private static func waitForModifierRelease() async {
+        let modifierMask: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+
+        for i in 0..<50 { // max 500ms
+            guard let event = CGEvent(source: nil) else { break }
+            let currentFlags = event.flags
+            let hasModifiers = currentFlags.contains(.maskCommand) ||
+                               currentFlags.contains(.maskAlternate) ||
+                               currentFlags.contains(.maskControl) ||
+                               currentFlags.contains(.maskShift)
+
+            if !hasModifiers {
+                if i > 0 {
+                    NSLog("[Yap] Modifiers released after %dms", i * 10)
+                }
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+        NSLog("[Yap] ⚠️ Modifiers still held after 500ms, proceeding anyway")
     }
 
     // MARK: - Focus Restoration
