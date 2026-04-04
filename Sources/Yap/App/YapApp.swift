@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct YapApp: App {
@@ -40,6 +41,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         PipelineController.shared.setup()
+
+        // Request notification permission (for insertion fallback)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            NSLog("[Yap] Notification permission: %@", granted ? "granted" : "denied")
+        }
 
         // Show onboarding on first launch
         if !UserDefaults.standard.bool(forKey: "onboardingCompleted") {

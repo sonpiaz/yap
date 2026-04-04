@@ -1,8 +1,9 @@
 import AppKit
 import ApplicationServices
+import UserNotifications
 
 /// Inserts transcribed text into the frontmost app.
-/// Strategy: restore focus → try AX insertion → fallback to clipboard + Cmd+V.
+/// Strategy: restore focus → try AX insertion → fallback to clipboard + Cmd+V → ultimate fallback: clipboard + notification.
 enum TextInserter {
 
     /// The app that was focused when recording started.
@@ -11,7 +12,15 @@ enum TextInserter {
 
     /// Async insert that properly waits for focus restoration without blocking main thread.
     static func insert(_ text: String) async {
+        // Check Accessibility permission first
+        guard AXIsProcessTrusted() else {
+            NSLog("[Yap] ⚠️ Accessibility NOT granted — cannot insert text, copying to clipboard")
+            copyToClipboardWithNotification(text, reason: "Grant Accessibility permission in System Settings so Yap can type for you.")
+            return
+        }
+
         // Restore focus to the app the user was dictating into
+        var focusRestored = false
         if let target = targetApp, target.bundleIdentifier != Bundle.main.bundleIdentifier {
             target.activate()
 
@@ -21,6 +30,7 @@ enum TextInserter {
                 if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier {
                     // One more yield to let the target app's run loop process the activation
                     try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                    focusRestored = true
                     break
                 }
             }
@@ -33,14 +43,20 @@ enum TextInserter {
         }
 
         // Try AX direct insertion (no clipboard pollution)
-        if AXIsProcessTrusted(), tryAXInsertion(text) {
-            NSLog("[Yap] Text inserted via Accessibility")
+        if tryAXInsertion(text) {
+            NSLog("[Yap] ✅ Text inserted via Accessibility")
             return
         }
 
         // Fallback: clipboard + Cmd+V
-        pasteViaClipboard(text)
-        NSLog("[Yap] Text inserted via clipboard paste")
+        if pasteViaClipboard(text) {
+            NSLog("[Yap] ✅ Text inserted via clipboard paste")
+            return
+        }
+
+        // Ultimate fallback: just copy to clipboard and notify user
+        NSLog("[Yap] ⚠️ All insertion methods failed, text copied to clipboard")
+        copyToClipboardWithNotification(text, reason: "Auto-paste failed. Text is in your clipboard — press ⌘V to paste.")
     }
 
     // MARK: - AX Direct Insert
@@ -94,33 +110,82 @@ enum TextInserter {
 
     // MARK: - Clipboard + Cmd+V
 
-    private static func pasteViaClipboard(_ text: String) {
+    /// Returns true if paste was likely successful (CGEvent created OK)
+    private static func pasteViaClipboard(_ text: String) -> Bool {
         let pb = NSPasteboard.general
         let old = pb.string(forType: .string)
 
         pb.clearContents()
         pb.setString(text, forType: .string)
 
-        simulateCmdV()
+        let pasted = simulateCmdV()
 
-        // Restore old clipboard after 500ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let old {
-                pb.clearContents()
-                pb.setString(old, forType: .string)
+        if pasted {
+            // Restore old clipboard after 500ms
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let old {
+                    pb.clearContents()
+                    pb.setString(old, forType: .string)
+                }
             }
         }
+
+        return pasted
     }
 
-    private static func simulateCmdV() {
-        guard let src = CGEventSource(stateID: .hidSystemState) else { return }
+    /// Returns true if CGEvent was successfully created and posted
+    private static func simulateCmdV() -> Bool {
+        guard let src = CGEventSource(stateID: .hidSystemState) else {
+            NSLog("[Yap] CGEventSource creation failed")
+            return false
+        }
         // key 0x09 = "V"
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
-        down?.flags = .maskCommand
-        down?.post(tap: .cghidEventTap)
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false) else {
+            NSLog("[Yap] CGEvent creation failed")
+            return false
+        }
 
-        let up = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
-        up?.flags = .maskCommand
-        up?.post(tap: .cghidEventTap)
+        down.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+
+        up.flags = .maskCommand
+        up.post(tap: .cghidEventTap)
+
+        return true
+    }
+
+    // MARK: - Ultimate Fallback: Clipboard + Notification
+
+    private static func copyToClipboardWithNotification(_ text: String, reason: String) {
+        // Always ensure text is in clipboard
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+
+        // Show macOS notification
+        let content = UNMutableNotificationContent()
+        content.title = "Yap — Text Ready"
+        content.subtitle = reason
+        // Show first 100 chars of text in notification body
+        content.body = String(text.prefix(100)) + (text.count > 100 ? "…" : "")
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "yap-insertion-fallback-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("[Yap] Notification error: %@", error.localizedDescription)
+            }
+        }
+
+        // Also update AppState error to show in UI
+        Task { @MainActor in
+            AppState.shared.error = "⌘V to paste — \(reason)"
+        }
     }
 }

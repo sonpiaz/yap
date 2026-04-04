@@ -26,8 +26,9 @@ targets:
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
-        ENABLE_HARDENED_RUNTIME: false
-        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_IDENTITY: "Apple Development: me.nguyentungson@gmail.com (LC36QSW9KK)"
+        DEVELOPMENT_TEAM: 6WMWJ85DDY
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: Resources/Yap.entitlements
