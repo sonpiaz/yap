@@ -27,19 +27,21 @@ enum TextInserter {
         // Extra settle time — let target app fully process activation
         try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
 
-        // Step 2: Try AX insertion first (clean, no clipboard)
-        if axTrusted, tryAXInsertion(text) {
-            NSLog("[Yap] ✅ Inserted via AX")
-            return
-        }
-
-        // Step 3: Clipboard + Cmd+V (most universally reliable)
+        // Step 2: Clipboard + Cmd+V — PRIMARY method (like Wispr Flow)
+        // AX insertion "succeeds" on Electron apps (Mandeck, VS Code, Slack, etc.)
+        // but text is silently ignored. Cmd+V is the only reliable universal method.
         if axTrusted {
             let pasted = await pasteViaClipboard(text)
             if pasted {
                 NSLog("[Yap] ✅ Inserted via Cmd+V")
                 return
             }
+        }
+
+        // Step 3: AX insertion fallback (works for native macOS apps)
+        if axTrusted, tryAXInsertion(text) {
+            NSLog("[Yap] ✅ Inserted via AX")
+            return
         }
 
         // Step 4: Fallback — just put in clipboard and notify

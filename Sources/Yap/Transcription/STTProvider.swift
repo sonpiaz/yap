@@ -64,22 +64,38 @@ enum STTProvider {
         body.append("--\(boundary)--\r\n")
         request.httpBody = body
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Retry with exponential backoff on rate limit (429)
+        var lastError: Error = STTError.networkError
+        for attempt in 0..<3 {
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let http = response as? HTTPURLResponse else {
-            throw STTError.networkError
-        }
-        guard http.statusCode == 200 else {
-            let msg = String(data: data, encoding: .utf8) ?? "Unknown"
-            throw STTError.apiError(http.statusCode, msg)
-        }
+            guard let http = response as? HTTPURLResponse else {
+                throw STTError.networkError
+            }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let text = json["text"] as? String else {
-            throw STTError.parseError
-        }
+            if http.statusCode == 429 {
+                let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
+                    .flatMap(Double.init) ?? pow(2.0, Double(attempt + 1))
+                let delay = min(retryAfter, 30.0)
+                NSLog("[Yap] Rate limited (transcription), retrying in %.0fs (%d/3)", delay, attempt + 1)
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                lastError = STTError.apiError(429, "Rate limited")
+                continue
+            }
 
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard http.statusCode == 200 else {
+                let msg = String(data: data, encoding: .utf8) ?? "Unknown"
+                throw STTError.apiError(http.statusCode, msg)
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let text = json["text"] as? String else {
+                throw STTError.parseError
+            }
+
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        throw lastError
     }
 
     // MARK: - GPT-4o Rewrite
@@ -103,10 +119,27 @@ enum STTProvider {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            NSLog("[Yap] Rewrite failed, using raw transcription")
-            return text // fallback to raw transcription
+        // Retry with backoff on rate limit
+        var rewriteData: Data?
+        for attempt in 0..<3 {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return text }
+            if http.statusCode == 429 {
+                let delay = pow(2.0, Double(attempt + 1))
+                NSLog("[Yap] Rate limited (rewrite), retrying in %.0fs (%d/3)", delay, attempt + 1)
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                continue
+            }
+            guard http.statusCode == 200 else {
+                NSLog("[Yap] Rewrite failed (%d), using raw transcription", http.statusCode)
+                return text
+            }
+            rewriteData = data
+            break
+        }
+        guard let data = rewriteData else {
+            NSLog("[Yap] Rewrite rate limited after 3 attempts, using raw transcription")
+            return text
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
