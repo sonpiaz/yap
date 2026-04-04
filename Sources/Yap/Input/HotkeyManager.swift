@@ -208,21 +208,16 @@ final class HotkeyManager {
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.isModifierDown else { return }
 
-                if self.eventBuffer.isEmpty {
-                    // No other keys pressed — clean solo hold → activate!
-                    self.isActivated = true
-                    self.isBuffering = false
-                    NSLog("[Yap] ⌘ ACTIVATED — solo hold confirmed")
-                    self.onKeyDown?()
-                } else {
-                    // Keys were pressed during grace period → it's a shortcut
-                    // Flush buffered events back to the OS
-                    NSLog("[Yap] ⌘ grace period ended but %d keys buffered — flushing as shortcut", self.eventBuffer.count)
-                    self.isBuffering = false
-                    self.isModifierDown = false
-                    self.flushBuffer()
-                    DispatchQueue.main.async { self.onCancelled?() }
-                }
+                // Key insight (from Wispr Flow): if modifier is STILL HELD after
+                // grace period, ALWAYS activate — even if other keys were pressed.
+                // The user pressed Cmd+T (shortcut) then kept holding Cmd to dictate.
+                // Discard buffered events — they already executed via flush or don't matter.
+                let bufferedCount = self.eventBuffer.count
+                self.isActivated = true
+                self.isBuffering = false
+                self.eventBuffer.removeAll()
+                NSLog("[Yap] ⌘ ACTIVATED — held past grace period (discarded %d buffered events)", bufferedCount)
+                self.onKeyDown?()
             }
             activationWorkItem = work
             DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay, execute: work)
@@ -269,17 +264,18 @@ final class HotkeyManager {
     private func handleKeyEvent(event: CGEvent, proxy: CGEventTapProxy, isDown: Bool) -> Unmanaged<CGEvent>? {
 
         if isBuffering && isModifierDown && !isActivated {
-            // During grace period — INTERCEPT and BUFFER the event
-            // Do NOT cancel activation yet — wait for grace period to decide
-            if let copy = event.copy() {
-                eventBuffer.append((event: copy, proxy: proxy))
-            }
+            // During grace period — let the event PASS THROUGH to the app
+            // (so Cmd+C/V/T shortcuts work normally) but remember it happened.
+            // We'll still activate if Cmd is held past the grace period.
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            NSLog("[Yap] Buffered key %@ code=%lld (total: %d)",
-                  isDown ? "down" : "up", keyCode, eventBuffer.count)
-
-            // Return nil to SWALLOW the event (don't pass to app yet)
-            return nil
+            NSLog("[Yap] Key %@ code=%lld during grace period (passing through)",
+                  isDown ? "down" : "up", keyCode)
+            // Just track that keys were pressed (for logging), don't buffer
+            if isDown {
+                eventBuffer.append((event: event, proxy: proxy))
+            }
+            // PASS THROUGH — let the shortcut work
+            return Unmanaged.passUnretained(event)
         }
 
         if isActivated {
