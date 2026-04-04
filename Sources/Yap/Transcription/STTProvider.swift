@@ -122,24 +122,37 @@ enum STTProvider {
     // MARK: - WAV Encoder
 
     private static func createWAV(samples: [Float], sampleRate: Int) throws -> Data {
-        // Convert Float32 → Int16 PCM (more reliable for OpenAI API)
-        let int16Format = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
+        // AVAudioFile.write(from:) requires buffer in the *processing* format
+        // (Float32 by default). AVAudioFile handles conversion to Int16 on disk.
+        let float32Format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
             sampleRate: Double(sampleRate),
             channels: 1,
-            interleaved: true
+            interleaved: false
         )!
-        let buffer = AVAudioPCMBuffer(pcmFormat: int16Format, frameCapacity: AVAudioFrameCount(samples.count))!
+
+        let buffer = AVAudioPCMBuffer(pcmFormat: float32Format, frameCapacity: AVAudioFrameCount(samples.count))!
         buffer.frameLength = AVAudioFrameCount(samples.count)
 
-        let int16Data = buffer.int16ChannelData![0]
+        // Copy samples into the buffer
+        let channelData = buffer.floatChannelData![0]
         for i in 0..<samples.count {
-            int16Data[i] = Int16(max(-1, min(1, samples[i])) * Float(Int16.max))
+            channelData[i] = samples[i]
         }
+
+        // Write as Int16 WAV on disk (smaller, more reliable for OpenAI API)
+        let int16Settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: Double(sampleRate),
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ]
 
         let tmpURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("yap_\(UUID().uuidString).wav")
-        let file = try AVAudioFile(forWriting: tmpURL, settings: int16Format.settings)
+        let file = try AVAudioFile(forWriting: tmpURL, settings: int16Settings)
         try file.write(from: buffer)
         let data = try Data(contentsOf: tmpURL)
         try? FileManager.default.removeItem(at: tmpURL)

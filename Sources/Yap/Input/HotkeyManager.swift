@@ -19,7 +19,7 @@ final class HotkeyManager {
     var targetModifier: CGEventFlags = .maskCommand
 
     /// Grace period to distinguish solo-Command from Cmd+C etc.
-    private let activationDelay: TimeInterval = 0.20
+    private let activationDelay: TimeInterval = 0.50
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?

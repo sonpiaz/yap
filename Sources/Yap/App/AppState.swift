@@ -54,7 +54,6 @@ final class AppState: ObservableObject {
 
     func addTranscription(_ text: String) {
         transcriptions.insert(Transcription(text: text), at: 0)
-        if transcriptions.count > 200 { transcriptions = Array(transcriptions.prefix(200)) }
         saveHistory()
     }
 

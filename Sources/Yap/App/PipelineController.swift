@@ -59,7 +59,7 @@ final class PipelineController {
         }
     }
 
-    /// Step 2: 200ms passed, no other key — confirm this is a solo hold
+    /// Step 2: 500ms passed, no other key — confirm this is a solo hold
     func confirmRecording() {
         guard isPreRecording || !state.isRecording else { return }
         isPreRecording = false
@@ -71,6 +71,9 @@ final class PipelineController {
                 return
             }
         }
+
+        // Remember which app the user is dictating into
+        TextInserter.targetApp = NSWorkspace.shared.frontmostApplication
 
         state.isRecording = true
         state.showOverlay = true
@@ -102,9 +105,11 @@ final class PipelineController {
 
         let samples = recorder.stopRecording()
 
+        // Hide floating bar BEFORE state changes to avoid
+        // SwiftUI teardown racing with @Published updates
+        FloatingBarController.shared.hide()
         state.isRecording = false
         state.showOverlay = false
-        FloatingBarController.shared.hide()
         MediaController.resumeIfPaused()
 
         // Too short — cancel

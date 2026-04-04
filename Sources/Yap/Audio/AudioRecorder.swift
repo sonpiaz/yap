@@ -71,7 +71,7 @@ final class AudioRecorder {
         buffer.removeAll()
         lock.unlock()
 
-        DispatchQueue.main.async { self.audioLevel = 0 }
+        DispatchQueue.main.async { [weak self] in self?.audioLevel = 0 }
         NSLog("[Yap] Recording stopped, %d samples (%.1fs)", samples.count, Float(samples.count) / 16000)
         return samples
     }
@@ -99,8 +99,8 @@ final class AudioRecorder {
 
         // RMS for level meter
         let rms = sqrt(samples.reduce(0) { $0 + $1 * $1 } / max(Float(count), 1))
-        DispatchQueue.main.async {
-            self.audioLevel = min(1.0, rms * 10)
+        DispatchQueue.main.async { [weak self] in
+            self?.audioLevel = min(1.0, rms * 10)
         }
     }
 }
