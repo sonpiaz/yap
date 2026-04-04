@@ -15,6 +15,9 @@ targets:
       - path: Resources/Assets.xcassets
         type: file
         buildPhase: resources
+      - path: Resources/Sounds
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sonpiaz.yap
