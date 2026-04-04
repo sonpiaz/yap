@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("openaiApiKey") private var apiKey = ""
     @AppStorage("transcriptionMode") private var modeRaw = TranscriptionMode.normal.rawValue
     @AppStorage("soundEnabled") private var soundEnabled = true
+    @AppStorage("soundTheme") private var soundTheme = "deep"
     @AppStorage("muteMusic") private var muteMusic = false
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("hotkeyChoice") private var hotkeyChoice = "command"
@@ -150,6 +151,17 @@ struct SettingsView: View {
                     LaunchAtLogin.set(enabled: newValue)
                 }
             Toggle("Sound feedback", isOn: $soundEnabled)
+            if soundEnabled {
+                Picker("Sound theme", selection: $soundTheme) {
+                    Text("Deep Bass").tag("deep")
+                    Text("Crystal").tag("crystal")
+                    Text("Minimal").tag("minimal")
+                }
+                .onChange(of: soundTheme) { _, _ in
+                    SoundFeedback.shared.reloadTheme()
+                    SoundFeedback.shared.playStartTone()
+                }
+            }
             Toggle("Mute music while dictating", isOn: $muteMusic)
         }
     }

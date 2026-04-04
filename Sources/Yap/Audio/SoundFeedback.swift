@@ -1,42 +1,33 @@
 import AVFoundation
 
-/// Premium audio feedback using pre-rendered WAV files.
-/// Generated with studio DSP: layered synthesis, ADSR envelopes,
-/// biquad filters, soft saturation, convolution reverb.
-///
-/// Sound files: Resources/Sounds/*.wav (48kHz 16-bit mono)
+/// Premium audio feedback with selectable themes.
+/// Sound files: Resources/Sounds/{theme}/*.wav
 final class SoundFeedback {
     static let shared = SoundFeedback()
 
     private var player: AVAudioPlayer?
+    private var currentTheme: String
 
-    private init() {}
-
-    /// Warm bass bloom — "I'm listening"
-    func playStartTone() {
-        play("start")
+    private init() {
+        currentTheme = UserDefaults.standard.string(forKey: "soundTheme") ?? "deep"
     }
 
-    /// Deep resonant confirmation — "Got it"
-    func playStopTone() {
-        play("stop")
+    func reloadTheme() {
+        currentTheme = UserDefaults.standard.string(forKey: "soundTheme") ?? "deep"
     }
 
-    /// Subtle muted thud — "Cancelled"
-    func playCancelTone() {
-        play("cancel")
-    }
-
-    /// Gentle warning — "Something went wrong"
-    func playErrorTone() {
-        play("error")
-    }
-
-    // MARK: - Playback
+    func playStartTone()  { play("start") }
+    func playStopTone()   { play("stop") }
+    func playCancelTone() { play("cancel") }
+    func playErrorTone()  { play("error") }
 
     private func play(_ name: String) {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "wav", subdirectory: "Sounds") else {
-            NSLog("[Yap] Sound file not found: %@.wav", name)
+        // Try theme-specific path first, then fallback
+        let themePath = "Sounds/\(currentTheme)"
+        guard let url = Bundle.main.url(forResource: name, withExtension: "wav", subdirectory: themePath)
+           ?? Bundle.main.url(forResource: name, withExtension: "wav", subdirectory: "Sounds/deep")
+        else {
+            NSLog("[Yap] Sound not found: %@/%@.wav", currentTheme, name)
             return
         }
 
@@ -45,7 +36,7 @@ final class SoundFeedback {
             player?.volume = 0.5
             player?.play()
         } catch {
-            NSLog("[Yap] Sound playback error: %@", error.localizedDescription)
+            NSLog("[Yap] Sound error: %@", error.localizedDescription)
         }
     }
 }
