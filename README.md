@@ -15,21 +15,22 @@
 
 ## Features
 
-- **Push-to-talk** — Hold `⌥Space` to record, or press once to toggle
-- **Auto-paste** — Transcribed text is pasted directly into the active app
-- **Multi-provider STT** — Groq (Whisper v3 Turbo), OpenAI (Whisper-1), Deepgram (Nova-3)
-- **Vietnamese + English** — Auto-detect or lock to a specific language
-- **Recording controls** — Mic selector, noise suppression, live input meter, mic test
-- **Transcription history** — Copy any previous transcription with one click
-- **Menu bar app** — Always ready, no dock icon
+- **Push-to-talk** — Hold `⌘ Command` (or `⌥` / `⌃` / `fn`) to record, release to transcribe
+- **Auto-paste** — Transcribed text is inserted directly into the active app via Accessibility API, with clipboard fallback
+- **Smart modes** — Normal, Clean (removes filler words), Email (rewrites as professional text), Auto (detects app context)
+- **Vietnamese + English** — Optimized for Vietnamese with mixed English support
+- **Premium sound feedback** — Layered harmonic chords for start/stop/cancel cues
+- **Floating bar** — Minimal top-of-screen recording indicator with app logo, waveform, and timer
+- **Transcription history** — Unlimited history, persisted locally, grouped by date
+- **Custom dictionary** — Add names and terms the model gets wrong
+- **Snippets** — Say a trigger word, get expanded text
+- **Onboarding wizard** — Guided first-launch setup for all required permissions
+- **Launch at login** — Optional auto-start
+- **Mute music** — Auto-pause media while dictating
+- **Usage tracking** — Monthly transcription stats
+- **Menu bar + dock app** — Always ready from menu bar, full window from dock icon
 
 ## Install
-
-### Homebrew (recommended)
-
-```bash
-brew install --cask sonpiaz/tap/yap
-```
 
 ### Build from source
 
@@ -42,21 +43,22 @@ make run
 
 ## Quick Start
 
-1. Open Yap from menu bar
-2. Go to Settings → add your API key ([Groq](https://console.groq.com), [OpenAI](https://platform.openai.com), or [Deepgram](https://console.deepgram.com))
-3. Choose STT provider and language
-4. Hold `⌥Space` and speak
+1. Launch Yap — the onboarding wizard guides you through permissions
+2. Go to Settings → add your [OpenAI API key](https://platform.openai.com)
+3. Hold `⌘ Command` and speak
+4. Release — text appears in the active app
 
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
-- API key from one of: Groq, OpenAI, or Deepgram
-- Accessibility permission (for auto-paste)
+- OpenAI API key (uses `gpt-4o-transcribe`)
 - Microphone permission
+- Accessibility permission (for text insertion)
+- Input Monitoring permission (for hotkey detection)
 
 ## Privacy
 
-Yap sends audio data **only** to the STT provider you choose for transcription. No audio is stored locally or sent anywhere else. API keys are stored in UserDefaults on your Mac.
+Yap sends audio data **only** to OpenAI for transcription. No audio is stored or sent anywhere else. API keys and transcription history are stored locally in UserDefaults on your Mac.
 
 ## Development
 
@@ -71,12 +73,27 @@ make clean       # Clean build artifacts
 
 ```
 Sources/Yap/
-├── YapApp.swift              — App entry, menu bar
-├── Audio/                    — AVFoundation audio capture
-├── Transcription/            — STT provider integration (Groq/OpenAI/Deepgram)
-├── Input/                    — Hotkey management, text insertion
-├── Settings/                 — Settings UI
-└── History/                  — Transcription history
+├── App/
+│   ├── YapApp.swift              — App entry, menu bar, onboarding
+│   ├── AppState.swift            — Shared state, transcription history
+│   └── PipelineController.swift  — Hotkey → Record → Transcribe → Insert
+├── Audio/
+│   ├── AudioRecorder.swift       — 16kHz mono mic capture via AVAudioEngine
+│   └── SoundFeedback.swift       — Harmonic chord audio cues
+├── Input/
+│   ├── HotkeyManager.swift       — Global hotkey via CGEventTap
+│   └── TextInserter.swift        — AX API + clipboard text insertion
+├── Transcription/
+│   ├── STTProvider.swift         — OpenAI gpt-4o-transcribe API
+│   └── TranscriptionMode.swift   — Normal / Clean / Email / Auto modes
+├── Settings/
+│   └── SettingsView.swift        — API key, hotkey, dictionary, permissions
+├── UI/
+│   ├── ContentView.swift         — History list (menu bar popover)
+│   ├── MainView.swift            — Full window with sidebar
+│   ├── FloatingBar.swift         — Recording indicator bar
+│   └── OnboardingView.swift      — First-launch permission wizard
+└── System/                       — Launch at login, media control, usage tracking
 ```
 
 ## Tech Stack
@@ -85,8 +102,10 @@ Sources/Yap/
 |-----------|---------|
 | [Swift 5.9](https://swift.org/) | Language |
 | SwiftUI | UI framework |
-| AVFoundation | Audio capture |
-| Cloud STT APIs | Groq, OpenAI, Deepgram |
+| AVFoundation | Audio capture & sound synthesis |
+| OpenAI API | `gpt-4o-transcribe` (STT), `gpt-4o-mini` (rewrite) |
+| Accessibility API | Direct text insertion |
+| CGEventTap | Global hotkey detection |
 | [XcodeGen](https://github.com/yonaskolb/XcodeGen) | Project generation |
 
 ## Contributing
